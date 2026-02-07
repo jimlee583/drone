@@ -22,6 +22,9 @@ dev = [
     "ruff>=0.1.0",
     "pytest>=7.0.0",
 ]
+rl = [
+    "gymnasium>=0.29",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
