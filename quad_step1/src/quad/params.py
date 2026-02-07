@@ -10,6 +10,9 @@ from typing import Optional
 import numpy as np
 from numpy.typing import NDArray
 
+from quad.motor_model import ActuatorParams
+from quad.disturbances import WindParams
+
 
 @dataclass
 class Params:
@@ -34,6 +37,12 @@ class Params:
 
     Optional:
         drag_coeff: Linear velocity drag coefficient (0 = off)
+
+    Actuator Dynamics (Step 2):
+        actuator: Parameters for first-order motor lag / saturation model.
+
+    Wind / Disturbances (Step 2):
+        wind: Parameters for wind, gusts, and drag disturbances.
     """
 
     # Physical parameters
@@ -70,6 +79,16 @@ class Params:
 
     # Optional aerodynamic drag (linear drag model)
     drag_coeff: float = 0.0  # Set > 0 to enable, e.g., 0.1
+
+    # --- Step-2 realism features -------------------------------------------
+
+    # First-order actuator dynamics (motor lag, rate limits, saturation).
+    # Enabled by default with conservative settings that keep hover stable.
+    actuator: ActuatorParams = field(default_factory=ActuatorParams)
+
+    # Wind / environmental disturbances.
+    # Enabled by default with mild breeze + light gusts.
+    wind: WindParams = field(default_factory=WindParams)
 
     def __post_init__(self) -> None:
         """Validate and convert parameters after initialization."""

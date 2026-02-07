@@ -12,6 +12,8 @@ adding reinforcement learning capabilities.
 - **Analytic reference trajectories**: hover, step, circle, figure-8
 - **Thrust and moment saturation** for realistic actuator limits
 - **Comprehensive logging and plotting** for validation
+- **First-order actuator dynamics** — motor lag, rate limiting, and hard saturation
+- **Environmental disturbances** — constant wind, stochastic gusts, and aerodynamic drag
 
 ## Installation
 
@@ -66,6 +68,8 @@ quad_step1/
     ├── dynamics.py         # Rigid body dynamics with RK4 integration
     ├── controller_se3.py   # Geometric SE(3) tracking controller
     ├── trajectory.py       # Reference trajectory generators
+    ├── motor_model.py      # First-order actuator dynamics (Step 2)
+    ├── disturbances.py     # Wind and gust disturbance model (Step 2)
     ├── sim.py              # Main simulation loop
     ├── log.py              # Simulation logging utilities
     ├── plots.py            # Visualization functions
@@ -125,12 +129,62 @@ Quadrotor UAV on SE(3)" (CDC 2010). It provides:
 - Largest errors at the crossover point
 - Demonstrates coupled position/attitude control
 
-## Future Extensions (Step 2+)
+## Actuator & Disturbance Realism (Step 2)
+
+The simulation now includes two optional (enabled-by-default) realism layers
+that sit between the controller output and the rigid-body dynamics:
+
+### First-Order Actuator Model (`motor_model.py`)
+
+Real motors cannot change thrust instantaneously.  A first-order lag models
+the combined ESC + motor-winding + propeller aerodynamic delay:
+
+    dT/dt = (T_cmd − T_actual) / τ_T
+
+- **Time constants**: τ\_T = 20 ms (thrust), τ\_τ = 15 ms (moments).
+- **Rate limiting**: slew rate is clamped so the actuator cannot exceed a
+  physically-realizable rate of change.
+- **Hard saturation**: thrust and moments are clipped to hardware limits.
+- Exact zero-order-hold (ZOH) discretisation is used for numerical stability.
+
+### Environmental Disturbances (`disturbances.py`)
+
+Outdoor flight conditions are modelled as:
+
+- **Constant mean wind** in the world frame (default: mild breeze at 0.5 m/s).
+- **Stochastic gusts** via a discrete Ornstein–Uhlenbeck process with
+  configurable correlation time and intensity.
+- **Linear aerodynamic drag**: F\_wind = −k\_drag · (v − v\_wind).
+- **Random torque noise** (small, body-frame) for prop-wash asymmetries.
+
+All disturbance RNG uses a fixed seed (42) for reproducibility.
+
+### Toggling
+
+Both features can be disabled independently for comparison or debugging:
+
+```python
+from quad.params import Params
+from quad.motor_model import ActuatorParams
+from quad.disturbances import WindParams
+
+# Disable actuator lag, keep wind
+params = Params(actuator=ActuatorParams(enabled=False))
+
+# Disable wind, keep actuator lag
+params = Params(wind=WindParams(enabled=False))
+
+# Disable both (Step-1 behaviour)
+params = Params(
+    actuator=ActuatorParams(enabled=False),
+    wind=WindParams(enabled=False),
+)
+```
+
+## Future Extensions (Step 3+)
 
 - Gym environment wrapper for RL
-- Motor dynamics and mixing
 - Sensor noise and state estimation
-- Wind disturbances
 - Domain randomization
 
 ## References

@@ -38,20 +38,26 @@ def state_derivative(
     state: State,
     control: Control,
     params: Params,
+    F_ext: NDArray[np.float64] | None = None,
+    tau_ext: NDArray[np.float64] | None = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     """
     Compute time derivatives of all state components.
 
     Dynamics:
         p_dot = v
-        v_dot = [0, 0, -g] + (1/m) * R(q) @ [0, 0, T] - drag * v
+        v_dot = [0, 0, -g] + (1/m) * (R(q) @ [0, 0, T] + F_ext) - drag * v
         q_dot = 0.5 * Omega(w_body) @ q
-        w_dot = J^{-1} * (tau - w × (J @ w))
+        w_dot = J^{-1} * (tau + tau_ext - w × (J @ w))
 
     Args:
         state: Current state
         control: Control inputs
         params: System parameters
+        F_ext: External force in world frame [N], shape (3,).
+               Includes wind drag, gusts, etc.  None → zero.
+        tau_ext: External torque in body frame [N·m], shape (3,).
+                 Includes random disturbance torques.  None → zero.
 
     Returns:
         Tuple of (p_dot, v_dot, q_dot, w_dot)
@@ -65,6 +71,12 @@ def state_derivative(
     # Unpack control
     T = control.thrust_N
     tau = control.moments_Nm
+
+    # Default external wrench to zero if not provided
+    if F_ext is None:
+        F_ext = np.zeros(3)
+    if tau_ext is None:
+        tau_ext = np.zeros(3)
 
     # Rotation matrix from body to world
     R = quat_to_R(q)
@@ -84,18 +96,19 @@ def state_derivative(
     # Optional linear drag
     drag = -params.drag_coeff * v if params.drag_coeff > 0 else np.zeros(3)
     
-    v_dot = gravity + (1.0 / params.m) * thrust_world + drag
+    # F_ext is an additive world-frame force (wind drag, gusts, etc.)
+    v_dot = gravity + (1.0 / params.m) * (thrust_world + F_ext) + drag
 
     # Quaternion derivative (quaternion kinematics)
     Omega = omega_matrix(w)
     q_dot = 0.5 * Omega @ q
 
     # Angular velocity derivative (Euler's equation)
-    # tau = J @ w_dot + w × (J @ w)
-    # w_dot = J^{-1} @ (tau - w × (J @ w))
+    # tau_total = tau_control + tau_ext  (body frame)
+    # w_dot = J^{-1} @ (tau_total - w × (J @ w))
     Jw = params.J @ w
     gyroscopic = np.cross(w, Jw)
-    w_dot = params.J_inv @ (tau - gyroscopic)
+    w_dot = params.J_inv @ (tau + tau_ext - gyroscopic)
 
     return p_dot, v_dot, q_dot, w_dot
 
@@ -105,6 +118,8 @@ def step_euler(
     control: Control,
     params: Params,
     dt: float,
+    F_ext: NDArray[np.float64] | None = None,
+    tau_ext: NDArray[np.float64] | None = None,
 ) -> State:
     """
     Simple forward Euler integration step.
@@ -116,11 +131,15 @@ def step_euler(
         control: Control inputs
         params: System parameters
         dt: Time step [s]
+        F_ext: External force in world frame [N], shape (3,). None → zero.
+        tau_ext: External torque in body frame [N·m], shape (3,). None → zero.
 
     Returns:
         Next state after dt
     """
-    p_dot, v_dot, q_dot, w_dot = state_derivative(state, control, params)
+    p_dot, v_dot, q_dot, w_dot = state_derivative(
+        state, control, params, F_ext=F_ext, tau_ext=tau_ext,
+    )
 
     # Integrate
     new_p = state.p + dt * p_dot
@@ -139,18 +158,23 @@ def step_rk4(
     control: Control,
     params: Params,
     dt: float,
+    F_ext: NDArray[np.float64] | None = None,
+    tau_ext: NDArray[np.float64] | None = None,
 ) -> State:
     """
     4th-order Runge-Kutta integration step.
 
     Provides good accuracy for the quadrotor dynamics.
-    Control is assumed constant over the timestep.
+    Control and external forces are assumed constant over the timestep
+    (zero-order hold).
 
     Args:
         state: Current state
         control: Control inputs
         params: System parameters
         dt: Time step [s]
+        F_ext: External force in world frame [N], shape (3,). None → zero.
+        tau_ext: External torque in body frame [N·m], shape (3,). None → zero.
 
     Returns:
         Next state after dt
@@ -169,7 +193,9 @@ def step_rk4(
 
     def f(x: NDArray[np.float64]) -> NDArray[np.float64]:
         s = unpack(x)
-        p_dot, v_dot, q_dot, w_dot = state_derivative(s, control, params)
+        p_dot, v_dot, q_dot, w_dot = state_derivative(
+            s, control, params, F_ext=F_ext, tau_ext=tau_ext,
+        )
         return np.concatenate([p_dot, v_dot, q_dot, w_dot])
 
     # RK4 integration
