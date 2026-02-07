@@ -4,10 +4,15 @@ __pycache__/
 *.pyo
 *.pyd
 *.egg-info/
+dist/
+build/
 
 # Virtual environments
 .venv/
 venv/
+
+# uv
+.python-version
 
 # OS
 .DS_Store

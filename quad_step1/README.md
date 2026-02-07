@@ -15,23 +15,26 @@ adding reinforcement learning capabilities.
 
 ## Installation
 
-### Option 1: Editable Install (Recommended)
+### Using uv (Recommended)
 
 ```bash
 cd quad_step1
-pip install -e .
+uv sync
 ```
 
 Then run:
 ```bash
-python -m quad.main
+uv run python -m quad.main
 ```
 
-### Option 2: Using PYTHONPATH
+### Alternative: pip
 
 ```bash
 cd quad_step1
-PYTHONPATH=src python -m quad.main
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -e .
+python -m quad.main
 ```
 
 ## Usage
