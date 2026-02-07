@@ -67,17 +67,19 @@ def detect_crash(log: SimLog) -> bool:
     """Detect if the simulation crashed.
 
     Checks for:
-      - ||p|| > 100 m  (diverged)
+      - ||p|| > 50 m  (diverged)
       - NaN in any state array
       - quaternion norm deviation > 0.01
     """
     # Position divergence
-    if np.any(np.linalg.norm(log.p, axis=1) > 100.0):
+    if np.any(np.linalg.norm(log.p, axis=1) > 50.0):
         return True
 
     # NaN in state
     for arr in (log.p, log.v, log.q, log.w_body):
         if np.any(np.isnan(arr)):
+            return True
+        if np.any(np.isinf(arr)):
             return True
 
     # Quaternion norm check

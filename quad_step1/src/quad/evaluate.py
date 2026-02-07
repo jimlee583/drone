@@ -67,6 +67,8 @@ def run_evaluation(
 
     for i in range(n_trials):
         params = randomize_params(base_params, rng)
+        if use_estimator:
+            params.use_estimator = True
         traj_fn = scenario.traj_fn()
 
         try:

@@ -179,6 +179,8 @@ def run_sim(
 
         # Log current state (record the *applied* control, not the command,
         # so plots reflect what the dynamics actually saw).
+        # NOTE: e_att / e_rate are from the controller's perspective (may use
+        # estimated state), while e_pos / e_vel always use truth for evaluation.
         record_step(
             log,
             t=t,
