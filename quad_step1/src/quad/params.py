@@ -12,6 +12,8 @@ from numpy.typing import NDArray
 
 from quad.motor_model import ActuatorParams
 from quad.disturbances import WindParams
+from quad.sensors import SensorParams
+from quad.estimator_ekf import EstimatorParams
 
 
 @dataclass
@@ -90,6 +92,13 @@ class Params:
     # Wind / environmental disturbances.
     # Enabled by default with mild breeze + light gusts.
     wind: WindParams = field(default_factory=WindParams)
+
+    # --- Step-3 state estimation ----------------------------------------
+
+    # If True, the controller receives EKF-estimated state instead of truth.
+    use_estimator: bool = False
+    sensor_params: SensorParams = field(default_factory=SensorParams)
+    estimator_params: EstimatorParams = field(default_factory=EstimatorParams)
 
     def __post_init__(self) -> None:
         """Validate and convert parameters after initialization."""

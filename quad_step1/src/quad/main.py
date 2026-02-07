@@ -160,6 +160,12 @@ Examples:
         help="Disable plot display",
     )
     
+    parser.add_argument(
+        "--use-estimator",
+        action="store_true",
+        help="Run controller off EKF-estimated state instead of truth.",
+    )
+    
     args = parser.parse_args()
     
     # Banner
@@ -169,6 +175,8 @@ Examples:
     
     # Initialize parameters
     params = default_params()
+    if args.use_estimator:
+        params.use_estimator = True
     print(f"\nQuadrotor Parameters:")
     print(f"  Mass: {params.m} kg")
     print(f"  Hover thrust: {params.hover_thrust:.2f} N")
