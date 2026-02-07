@@ -31,6 +31,7 @@ def record_step(
     t: float,
     state: State,
     control: Control,
+    cmd_control: Control,
     traj: TrajPoint,
     e_pos: NDArray[np.float64],
     e_vel: NDArray[np.float64],
@@ -46,14 +47,15 @@ def record_step(
         log: SimLog instance to record into
         t: Current time [s]
         state: Current quadrotor state
-        control: Current control inputs
+        control: Applied control inputs (post-actuator)
+        cmd_control: Commanded control inputs (pre-actuator)
         traj: Current desired trajectory point
         e_pos: Position error
         e_vel: Velocity error
         e_att: Attitude error
         e_rate: Rate error
     """
-    log.record(t, state, control, traj, e_pos, e_vel, e_att, e_rate)
+    log.record(t, state, control, cmd_control, traj, e_pos, e_vel, e_att, e_rate)
 
 
 def compute_statistics(log: SimLog) -> dict:
@@ -122,7 +124,7 @@ if __name__ == "__main__":
         t = i * 0.01
         state.p = np.array([0.0, 0.0, 1.0 + 0.001 * i])
         e_pos = state.p - traj.p
-        record_step(log, t, state, control, traj, e_pos, np.zeros(3), np.zeros(3), np.zeros(3))
+        record_step(log, t, state, control, control, traj, e_pos, np.zeros(3), np.zeros(3), np.zeros(3))
 
     log_trimmed = log.trim()
     assert len(log_trimmed.t) == 100, "Log should have 100 entries"

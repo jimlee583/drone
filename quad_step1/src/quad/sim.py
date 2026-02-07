@@ -113,6 +113,7 @@ def run_sim(
             t=t,
             state=state,
             control=applied_control,
+            cmd_control=cmd_control,
             traj=traj,
             e_pos=ctrl_state.e_pos,
             e_vel=ctrl_state.e_vel,
