@@ -19,8 +19,8 @@ Discrete-time (exact ZOH):
     T[k+1] = T[k] + alpha_T * (T_cmd - T[k])
     where alpha_T = 1 - exp(-dt / tau_T)
 
-Rate limiting is applied BEFORE the first-order lag to prevent
-physically impossible slew rates.
+Rate limiting is applied to the *output delta* of the first-order lag
+to prevent physically impossible slew rates.
 
 Hard saturation is applied AFTER integration to enforce actuator limits.
 """

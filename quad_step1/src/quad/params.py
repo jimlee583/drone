@@ -73,8 +73,9 @@ class Params:
     kr_att: NDArray[np.float64] = field(
         default_factory=lambda: np.array([0.1, 0.1, 0.05])
     )
+    # Rate gains — increased for zeta ~ 0.65 (from 0.33) to reduce overshoot
     kw_rate: NDArray[np.float64] = field(
-        default_factory=lambda: np.array([0.01, 0.01, 0.005])
+        default_factory=lambda: np.array([0.02, 0.02, 0.01])
     )
 
     # Optional aerodynamic drag (linear drag model)
@@ -92,6 +93,9 @@ class Params:
 
     def __post_init__(self) -> None:
         """Validate and convert parameters after initialization."""
+        # Pre-compute and cache the inertia inverse
+        self._J_inv: NDArray[np.float64] | None = None
+
         # Ensure arrays are numpy arrays
         if not isinstance(self.J, np.ndarray):
             self.J = np.array(self.J)
@@ -108,8 +112,10 @@ class Params:
 
     @property
     def J_inv(self) -> NDArray[np.float64]:
-        """Inverse of inertia matrix."""
-        return np.linalg.inv(self.J)
+        """Inverse of inertia matrix (cached)."""
+        if self._J_inv is None:
+            self._J_inv = np.linalg.inv(self.J)
+        return self._J_inv
 
     @property
     def hover_thrust(self) -> float:

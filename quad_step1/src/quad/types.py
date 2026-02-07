@@ -116,9 +116,13 @@ class SimLog:
     q: NDArray[np.float64]  # (N, 4)
     w_body: NDArray[np.float64]  # (N, 3)
 
-    # Control histories
+    # Control histories (applied, post-actuator)
     thrust: NDArray[np.float64]  # (N,)
     moments: NDArray[np.float64]  # (N, 3)
+
+    # Commanded (pre-actuator) control histories
+    thrust_cmd: NDArray[np.float64]  # (N,)
+    moments_cmd: NDArray[np.float64]  # (N, 3)
 
     # Desired trajectory histories
     p_des: NDArray[np.float64]  # (N, 3)
@@ -146,6 +150,8 @@ class SimLog:
             w_body=np.zeros((n_steps, 3)),
             thrust=np.zeros(n_steps),
             moments=np.zeros((n_steps, 3)),
+            thrust_cmd=np.zeros(n_steps),
+            moments_cmd=np.zeros((n_steps, 3)),
             p_des=np.zeros((n_steps, 3)),
             v_des=np.zeros((n_steps, 3)),
             a_des=np.zeros((n_steps, 3)),
@@ -162,6 +168,7 @@ class SimLog:
         t: float,
         state: State,
         control: Control,
+        cmd_control: Control,
         traj: TrajPoint,
         e_pos: NDArray[np.float64],
         e_vel: NDArray[np.float64],
@@ -177,6 +184,8 @@ class SimLog:
         self.w_body[i] = state.w_body
         self.thrust[i] = control.thrust_N
         self.moments[i] = control.moments_Nm
+        self.thrust_cmd[i] = cmd_control.thrust_N
+        self.moments_cmd[i] = cmd_control.moments_Nm
         self.p_des[i] = traj.p
         self.v_des[i] = traj.v
         self.a_des[i] = traj.a
@@ -198,6 +207,8 @@ class SimLog:
             w_body=self.w_body[:n],
             thrust=self.thrust[:n],
             moments=self.moments[:n],
+            thrust_cmd=self.thrust_cmd[:n],
+            moments_cmd=self.moments_cmd[:n],
             p_des=self.p_des[:n],
             v_des=self.v_des[:n],
             a_des=self.a_des[:n],

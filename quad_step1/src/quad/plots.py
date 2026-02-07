@@ -248,7 +248,7 @@ def plot_attitude_errors(
 
     # Attitude error (convert to degrees)
     att_err_deg = np.rad2deg(log.e_att)
-    for i, (label, color) in enumerate(zip(['Roll', 'Pitch', 'Yaw'], ['r', 'g', 'b'])):
+    for i, (label, color) in enumerate(zip(['x (roll)', 'y (pitch)', 'z (yaw)'], ['r', 'g', 'b'])):
         axes[0].plot(log.t, att_err_deg[:, i], color=color, 
                      label=f'{label} error', linewidth=1.5)
     axes[0].set_ylabel('Attitude Error [deg]')
@@ -528,6 +528,8 @@ if __name__ == "__main__":
         w_body=np.zeros((n, 3)),
         thrust=5.0 * np.ones(n),
         moments=np.zeros((n, 3)),
+        thrust_cmd=5.0 * np.ones(n),
+        moments_cmd=np.zeros((n, 3)),
         p_des=np.column_stack([np.cos(t), np.sin(t), np.ones(n)]),
         v_des=np.column_stack([-np.sin(t), np.cos(t), np.zeros(n)]),
         a_des=np.column_stack([-np.cos(t), -np.sin(t), np.zeros(n)]),
