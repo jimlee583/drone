@@ -4,7 +4,7 @@ Visualization functions for simulation results.
 Provides various plots for analyzing quadrotor tracking performance.
 """
 
-from typing import Optional, List
+from typing import List
 import numpy as np
 from numpy.typing import NDArray
 
@@ -424,23 +424,17 @@ def plot_euler_angles(
 
 def plot_thrust_comparison(
     log: SimLog,
-    log_cmd: Optional[SimLog] = None,
     title: str = "Commanded vs Applied Thrust",
     show: bool = False,
 ) -> Figure:
     """
-    Plot commanded vs applied thrust over time.
+    Plot commanded vs applied thrust and moments over time.
 
-    When actuator dynamics are enabled the logged thrust is the *applied*
-    (lagged) value.  If a second log recorded with the actuator disabled
-    is provided, it can be overlaid as the "commanded" signal.
-
-    For a single log this simply shows the applied thrust with the
-    hard-saturation limits shaded.
+    Overlays the commanded signal (from the controller) with the applied
+    signal (after actuator dynamics).  Both are stored in the same SimLog.
 
     Args:
-        log: Simulation log (applied thrust when actuator is on).
-        log_cmd: Optional second log with commanded thrust.
+        log: Simulation log containing both applied and commanded controls.
         title: Plot title.
         show: If True, call plt.show().
 
@@ -452,9 +446,8 @@ def plot_thrust_comparison(
     # --- Thrust subplot ---
     ax = axes[0]
     ax.plot(log.t, log.thrust, 'b-', linewidth=1.5, label='Applied thrust')
-    if log_cmd is not None:
-        ax.plot(log_cmd.t, log_cmd.thrust, 'r--', linewidth=1.0,
-                alpha=0.7, label='Commanded thrust')
+    ax.plot(log.t, log.thrust_cmd, 'r--', linewidth=1.0,
+            alpha=0.7, label='Commanded thrust')
     ax.set_ylabel('Thrust [N]')
     ax.set_title(title)
     ax.legend(loc='upper right')
@@ -466,8 +459,10 @@ def plot_thrust_comparison(
     colors = ['r', 'g', 'b']
     for i, (label, color) in enumerate(zip(labels, colors)):
         ax.plot(log.t, log.moments[:, i] * 1000, color=color,
-                label=label, linewidth=1.5)
-    ax.set_ylabel('Applied Moments [mN·m]')
+                label=f'{label} applied', linewidth=1.5)
+        ax.plot(log.t, log.moments_cmd[:, i] * 1000, '--', color=color,
+                alpha=0.7, label=f'{label} commanded', linewidth=1.0)
+    ax.set_ylabel('Moments [mN·m]')
     ax.set_xlabel('Time [s]')
     ax.legend(loc='upper right')
     ax.grid(True, alpha=0.3)
