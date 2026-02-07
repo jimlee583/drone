@@ -422,6 +422,64 @@ def plot_euler_angles(
     return fig
 
 
+def plot_thrust_comparison(
+    log: SimLog,
+    log_cmd: Optional[SimLog] = None,
+    title: str = "Commanded vs Applied Thrust",
+    show: bool = False,
+) -> Figure:
+    """
+    Plot commanded vs applied thrust over time.
+
+    When actuator dynamics are enabled the logged thrust is the *applied*
+    (lagged) value.  If a second log recorded with the actuator disabled
+    is provided, it can be overlaid as the "commanded" signal.
+
+    For a single log this simply shows the applied thrust with the
+    hard-saturation limits shaded.
+
+    Args:
+        log: Simulation log (applied thrust when actuator is on).
+        log_cmd: Optional second log with commanded thrust.
+        title: Plot title.
+        show: If True, call plt.show().
+
+    Returns:
+        matplotlib Figure
+    """
+    fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+
+    # --- Thrust subplot ---
+    ax = axes[0]
+    ax.plot(log.t, log.thrust, 'b-', linewidth=1.5, label='Applied thrust')
+    if log_cmd is not None:
+        ax.plot(log_cmd.t, log_cmd.thrust, 'r--', linewidth=1.0,
+                alpha=0.7, label='Commanded thrust')
+    ax.set_ylabel('Thrust [N]')
+    ax.set_title(title)
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    # --- Moments subplot ---
+    ax = axes[1]
+    labels = ['τ_x (roll)', 'τ_y (pitch)', 'τ_z (yaw)']
+    colors = ['r', 'g', 'b']
+    for i, (label, color) in enumerate(zip(labels, colors)):
+        ax.plot(log.t, log.moments[:, i] * 1000, color=color,
+                label=label, linewidth=1.5)
+    ax.set_ylabel('Applied Moments [mN·m]')
+    ax.set_xlabel('Time [s]')
+    ax.legend(loc='upper right')
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+
+    return fig
+
+
 def plot_all(
     log: SimLog,
     name: str = "Simulation",

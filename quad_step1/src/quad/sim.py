@@ -3,6 +3,14 @@ Main simulation loop.
 
 Orchestrates the interaction between dynamics, controller,
 and trajectory for a complete simulation run.
+
+The simulation pipeline per timestep is:
+    1. Controller  →  commanded control (thrust + moments)
+    2. Actuator model  →  applied control (with lag, rate limit, saturation)
+    3. Disturbance model  →  external forces (wind drag) and torques (gusts)
+    4. RK4 dynamics step  →  next state
+
+Both the actuator model and disturbances are toggleable via params.
 """
 
 from typing import Callable, Optional
@@ -15,6 +23,8 @@ from quad.params import Params, default_params
 from quad.dynamics import step_rk4
 from quad.controller_se3 import se3_controller
 from quad.log import allocate_log, record_step
+from quad.motor_model import ActuatorState, step_actuator
+from quad.disturbances import DisturbanceState, compute_disturbance_forces
 
 
 def run_sim(
@@ -30,6 +40,13 @@ def run_sim(
 
     Simulates the quadrotor from initial state, tracking the given
     trajectory using the SE(3) controller and RK4 integration.
+
+    The loop now includes:
+    - First-order actuator dynamics (motor lag + rate limiting + saturation)
+    - Environmental disturbances (wind drag + gusts + torque noise)
+
+    Both are enabled by default but can be disabled via ``params.actuator``
+    and ``params.wind``.
 
     Args:
         params: Quadrotor and controller parameters
@@ -51,6 +68,13 @@ def run_sim(
     else:
         state = x0.copy()
 
+    # Initialize actuator state at hover so there is no initial transient
+    # when the quad is already near hover equilibrium.
+    act_state = ActuatorState.from_hover(params.hover_thrust)
+
+    # Initialize disturbance state with the configured seed.
+    dist_state = DisturbanceState.create(seed=params.wind.seed)
+
     # Pre-allocate log
     log = allocate_log(n_steps)
 
@@ -60,20 +84,35 @@ def run_sim(
     
     if verbose:
         print(f"Starting simulation: t_final={t_final}s, dt={dt*1000:.1f}ms, steps={n_steps}")
+        if params.actuator.enabled:
+            print(f"  Actuator model ON  (tau_T={params.actuator.tau_T*1e3:.0f}ms)")
+        if params.wind.enabled:
+            print(f"  Wind model ON  (mean={params.wind.wind_vel}, gust_std={params.wind.gust_std})")
 
     while t <= t_final and step < n_steps:
         # Get desired trajectory at current time
         traj = traj_fn(t)
 
-        # Compute control
-        control, ctrl_state = se3_controller(state, traj, params)
+        # 1) Controller  →  commanded control
+        cmd_control, ctrl_state = se3_controller(state, traj, params)
 
-        # Log current state
+        # 2) Actuator model  →  applied (lagged/saturated) control
+        act_state, applied_control = step_actuator(
+            act_state, cmd_control, params.actuator, dt,
+        )
+
+        # 3) Disturbance model  →  external wrench
+        F_ext, tau_ext, dist_state = compute_disturbance_forces(
+            state.v, dist_state, params.wind, dt,
+        )
+
+        # Log current state (record the *applied* control, not the command,
+        # so plots reflect what the dynamics actually saw).
         record_step(
             log,
             t=t,
             state=state,
-            control=control,
+            control=applied_control,
             traj=traj,
             e_pos=ctrl_state.e_pos,
             e_vel=ctrl_state.e_vel,
@@ -81,8 +120,11 @@ def run_sim(
             e_rate=ctrl_state.e_rate,
         )
 
-        # Integrate dynamics
-        state = step_rk4(state, control, params, dt)
+        # 4) Integrate dynamics with applied control + external wrench
+        state = step_rk4(
+            state, applied_control, params, dt,
+            F_ext=F_ext, tau_ext=tau_ext,
+        )
 
         # Advance time
         t += dt
@@ -244,9 +286,11 @@ if __name__ == "__main__":
 
     print_statistics(log, "Hover Test")
 
-    # Check that we reached the target
+    # Check that we reached the target.
+    # Tolerance is 50 mm to account for steady-state offset from wind
+    # disturbances (the SE(3) controller has no integral term).
     final_pos = log.p[-1]
-    assert np.abs(final_pos[2] - 1.0) < 0.01, f"Should be near z=1.0, got {final_pos[2]}"
-    print("  [PASS] Hover reached target altitude")
+    assert np.abs(final_pos[2] - 1.0) < 0.05, f"Should be near z=1.0, got {final_pos[2]}"
+    print(f"  [PASS] Hover reached target altitude (z={final_pos[2]:.4f} m)")
 
     print("\nSimulation test passed!")
