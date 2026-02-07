@@ -229,6 +229,7 @@ class QuadRacingEnv(gym.Env):
         self._est_state: Any = None
         self._sensor_st: Any = None
         self._v_prev: Optional[NDArray] = None
+        self._last_gyro: Optional[NDArray] = None
 
     # ------------------------------------------------------------------
     # Seeding (Gymnasium >=0.26)
@@ -382,7 +383,7 @@ class QuadRacingEnv(gym.Env):
         """Return the observation from the state visible to the policy."""
         if self.cfg.use_estimator and self._est_state is not None:
             from quad.estimator_ekf import get_estimated_state
-            x_obs = get_estimated_state(self._est_state)
+            x_obs = get_estimated_state(self._est_state, self._last_gyro)
         else:
             x_obs = self._state
         return _build_obs(x_obs, self._track)
@@ -394,8 +395,13 @@ class QuadRacingEnv(gym.Env):
     ) -> Tuple[NDArray, NDArray, NDArray, float, float]:
         """Simple PD to compute desired (p, v, a, yaw, yaw_rate) from WP."""
         wp = self._track.current_waypoint
-        p = self._state.p
-        v = self._state.v
+        if self.cfg.use_estimator and self._est_state is not None:
+            from quad.estimator_ekf import get_estimated_state
+            x_base = get_estimated_state(self._est_state, self._last_gyro)
+        else:
+            x_base = self._state
+        p = x_base.p
+        v = x_base.v
 
         # Vector toward waypoint
         dp = wp - p
@@ -460,9 +466,11 @@ class QuadRacingEnv(gym.Env):
         sp = getattr(self.params, "sensor_params", SensorParams())
         ep = getattr(self.params, "estimator_params", EstimatorParams())
 
-        self._sensor_st = init_sensor_state(sp.seed, sp)
+        sensor_seed = int(self._get_np_random().integers(0, 2**31))
+        self._sensor_st = init_sensor_state(sensor_seed, sp)
         self._est_state = init_estimator(ep, x0_truth=self._state)
         self._v_prev = self._state.v.copy()
+        self._last_gyro = np.zeros(3)
 
     def _estimator_step(self, truth: State, dt: float) -> State:
         from quad.sensors import sample_measurements
@@ -502,6 +510,7 @@ class QuadRacingEnv(gym.Env):
                 self._est_state, meas.pos_fix,
                 sp.posfix_noise_std**2 * np.eye(3),
             )
+        self._last_gyro = meas.gyro
         return get_estimated_state(self._est_state, meas.gyro)
 
     # ------------------------------------------------------------------
@@ -531,14 +540,10 @@ class QuadRacingEnv(gym.Env):
         if s is None:
             return True
 
-        # NaN check
-        if (
-            np.any(np.isnan(s.p))
-            or np.any(np.isnan(s.v))
-            or np.any(np.isnan(s.q))
-            or np.any(np.isnan(s.w_body))
-        ):
-            return True
+        # NaN / inf check
+        for arr in (s.p, s.v, s.q, s.w_body):
+            if not np.all(np.isfinite(arr)):
+                return True
 
         # Position bound
         if np.linalg.norm(s.p) > self.cfg.pos_limit:
