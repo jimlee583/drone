@@ -73,7 +73,10 @@ quad_step1/
     ├── sim.py              # Main simulation loop
     ├── log.py              # Simulation logging utilities
     ├── plots.py            # Visualization functions
-    └── main.py             # Entry point
+    ├── main.py             # Entry point
+    ├── scenarios.py        # Evaluation scenario registry & param randomization
+    ├── metrics.py          # Evaluation metrics (RMS error, saturation, crash)
+    └── evaluate.py         # Monte Carlo evaluation CLI
 ```
 
 ## Technical Details
@@ -180,6 +183,59 @@ params = Params(
     wind=WindParams(enabled=False),
 )
 ```
+
+## Monte Carlo Evaluation Suite
+
+A built-in evaluation harness randomizes physical parameters and runs
+repeated trials to assess controller robustness.
+
+### Quick Start
+
+```bash
+# List available scenarios
+python -m quad.evaluate --list-scenarios
+
+# Run 50-trial evaluation on hover
+python -m quad.evaluate --scenario hover --trials 50 --seed 42 --verbose
+
+# Run on all scenarios
+for s in hover step circle figure8; do
+  python -m quad.evaluate --scenario $s --trials 50
+done
+```
+
+### Scenarios
+
+| Name     | Duration | Trajectory                             |
+|----------|----------|----------------------------------------|
+| hover    | 10 s     | Static hold at z = 1 m                 |
+| step     | 10 s     | Step to [1, 0, 1] at t = 1 s          |
+| circle   | 30 s     | Radius 3 m, speed 2 m/s, z = 1 m      |
+| figure8  | 40 s     | a = 2, b = 1, speed 1.5 m/s, z = 1 m  |
+
+### Metrics
+
+- **rms_pos_err / max_pos_err** — position tracking error [m]
+- **rms_vel_err** — velocity tracking error [m/s]
+- **control_effort** — integrated thrust^2 + ||moments||^2
+- **thrust_sat_pct** — % timesteps at thrust limits
+- **moment_sat_{roll,pitch,yaw,overall}** — % timesteps at moment limits
+- **crashed** — divergence / NaN / quaternion norm check
+
+### Randomization Ranges
+
+| Parameter              | Range              |
+|------------------------|--------------------|
+| Mass                   | ± 10 %             |
+| Inertia (per axis)     | ± 15 %             |
+| Motor time constants   | ± 30 %             |
+| Wind velocity          | 0 – 3 m/s (random) |
+| Gust seed              | random              |
+
+### Output
+
+Results are written to `results/` as CSV (one row per trial) and JSON
+(full config + per-trial metrics + aggregate stats).
 
 ## Future Extensions (Step 3+)
 
