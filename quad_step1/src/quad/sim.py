@@ -78,6 +78,30 @@ def run_sim(
     # Pre-allocate log
     log = allocate_log(n_steps)
 
+    # ---- Estimator setup (Step 3) ------------------------------------
+    use_estimator = getattr(params, 'use_estimator', False)
+    if use_estimator:
+        from quad.sensors import (
+            SensorParams as _SP, init_sensor_state, sample_measurements,
+        )
+        from quad.estimator_ekf import (
+            EstimatorParams as _EP, init_estimator, ekf_predict,
+            ekf_update_altimeter, ekf_update_posfix, get_estimated_state,
+        )
+
+        sensor_params = getattr(params, 'sensor_params', _SP())
+        est_params = getattr(params, 'estimator_params', _EP())
+
+        sensor_st = init_sensor_state(sensor_params.seed, sensor_params)
+        est_state = init_estimator(est_params, x0_truth=state)
+
+        # Allocate estimate log arrays
+        log.p_hat = np.zeros((n_steps, 3))
+        log.v_hat = np.zeros((n_steps, 3))
+        log.q_hat = np.zeros((n_steps, 4))
+
+        _v_prev = state.v.copy()  # for finite-diff truth v_dot
+
     # Simulation loop
     t = 0.0
     step = 0
@@ -88,13 +112,45 @@ def run_sim(
             print(f"  Actuator model ON  (tau_T={params.actuator.tau_T*1e3:.0f}ms)")
         if params.wind.enabled:
             print(f"  Wind model ON  (mean={params.wind.wind_vel}, gust_std={params.wind.gust_std})")
+        if use_estimator:
+            print(f"  Estimator ON  (alt={sensor_params.alt_enabled}, posfix={sensor_params.posfix_enabled})")
 
     while t <= t_final and step < n_steps:
         # Get desired trajectory at current time
         traj = traj_fn(t)
 
+        # ---- Estimator: sensor + EKF (Step 3) ----
+        if use_estimator:
+            # Approximate truth v_dot via finite difference
+            if step == 0:
+                truth_v_dot = np.zeros(3)
+            else:
+                truth_v_dot = (state.v - _v_prev) / dt
+            _v_prev = state.v.copy()
+
+            meas, sensor_st = sample_measurements(
+                t, dt, state, truth_v_dot, sensor_params, sensor_st,
+                g=params.g,
+            )
+            est_state = ekf_predict(
+                est_state, meas.gyro, meas.accel, est_params, dt,
+            )
+            if meas.alt is not None and est_params.use_alt_update:
+                est_state = ekf_update_altimeter(
+                    est_state, meas.alt,
+                    sensor_params.alt_noise_std ** 2,
+                )
+            if meas.pos_fix is not None and est_params.use_posfix_update:
+                est_state = ekf_update_posfix(
+                    est_state, meas.pos_fix,
+                    sensor_params.posfix_noise_std ** 2 * np.eye(3),
+                )
+            x_ctrl = get_estimated_state(est_state, meas.gyro)
+        else:
+            x_ctrl = state
+
         # 1) Controller  →  commanded control
-        cmd_control, ctrl_state = se3_controller(state, traj, params)
+        cmd_control, ctrl_state = se3_controller(x_ctrl, traj, params)
 
         # 2) Actuator model  →  applied (lagged/saturated) control
         act_state, applied_control = step_actuator(
@@ -106,6 +162,21 @@ def run_sim(
             state.v, dist_state, params.wind, dt,
         )
 
+        # Truth-based tracking errors for logging (always use truth state
+        # so that evaluation metrics remain consistent).
+        if use_estimator:
+            e_pos_log = state.p - traj.p
+            e_vel_log = state.v - traj.v
+        else:
+            e_pos_log = ctrl_state.e_pos
+            e_vel_log = ctrl_state.e_vel
+
+        # Log estimated state
+        if use_estimator and log.p_hat is not None:
+            log.p_hat[step] = est_state.p
+            log.v_hat[step] = est_state.v
+            log.q_hat[step] = est_state.q
+
         # Log current state (record the *applied* control, not the command,
         # so plots reflect what the dynamics actually saw).
         record_step(
@@ -115,8 +186,8 @@ def run_sim(
             control=applied_control,
             cmd_control=cmd_control,
             traj=traj,
-            e_pos=ctrl_state.e_pos,
-            e_vel=ctrl_state.e_vel,
+            e_pos=e_pos_log,
+            e_vel=e_vel_log,
             e_att=ctrl_state.e_att,
             e_rate=ctrl_state.e_rate,
         )
@@ -133,7 +204,7 @@ def run_sim(
 
         # Progress update
         if verbose and step % 1000 == 0:
-            pos_err = np.linalg.norm(ctrl_state.e_pos)
+            pos_err = np.linalg.norm(e_pos_log)
             print(f"  t={t:.2f}s, pos_err={pos_err*1000:.1f}mm")
 
     # Trim log to actual number of recorded steps

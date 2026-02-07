@@ -139,6 +139,11 @@ class SimLog:
     # Current write index
     _idx: int = field(default=0, repr=False)
 
+    # Optional estimated-state histories (populated when use_estimator=True)
+    p_hat: Optional[NDArray[np.float64]] = field(default=None, repr=False)
+    v_hat: Optional[NDArray[np.float64]] = field(default=None, repr=False)
+    q_hat: Optional[NDArray[np.float64]] = field(default=None, repr=False)
+
     @staticmethod
     def allocate(n_steps: int) -> "SimLog":
         """Pre-allocate arrays for n_steps timesteps."""
@@ -218,4 +223,7 @@ class SimLog:
             e_att=self.e_att[:n],
             e_rate=self.e_rate[:n],
             _idx=n,
+            p_hat=self.p_hat[:n] if self.p_hat is not None else None,
+            v_hat=self.v_hat[:n] if self.v_hat is not None else None,
+            q_hat=self.q_hat[:n] if self.q_hat is not None else None,
         )

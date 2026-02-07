@@ -237,10 +237,55 @@ done
 Results are written to `results/` as CSV (one row per trial) and JSON
 (full config + per-trial metrics + aggregate stats).
 
-## Future Extensions (Step 3+)
+## State Estimation (Step 3)
+
+An optional error-state EKF can be enabled so that the controller runs off
+estimated (noisy) state instead of truth state.
+
+### Sensor Model (`sensors.py`)
+
+- **IMU** (gyro + accelerometer) sampled every sim step with configurable
+  white noise and bias random-walk.
+- **Barometric altimeter** at 50 Hz (configurable).
+- **Position fix** (vision / GPS stand-in) at 20 Hz (configurable).
+
+### Error-State EKF (`estimator_ekf.py`)
+
+- 15-D error state: δp, δv, δθ, δb\_g, δb\_a.
+- Prediction from bias-corrected IMU.
+- Scalar altimeter update (z) and 3-D position-fix update.
+- Quaternion error injection via small-angle approximation.
+
+### Toggling
+
+```python
+from quad.params import Params
+
+params = Params(use_estimator=True)   # controller uses EKF estimate
+params = Params(use_estimator=False)  # controller uses truth (default)
+```
+
+### CLI
+
+```bash
+# Demo with estimator
+python -m quad.main --trajectory hover --use-estimator
+
+# Evaluation with estimator
+python -m quad.evaluate --scenario hover --trials 5 --seed 1 --use-estimator
+
+# Evaluation without estimator (default, unchanged)
+python -m quad.evaluate --scenario hover --trials 5 --seed 1
+```
+
+### Determinism
+
+Sensor noise is seeded via `SensorParams.seed` (default 0).  During Monte
+Carlo evaluation the seed is randomized per trial automatically.
+
+## Future Extensions (Step 4+)
 
 - Gym environment wrapper for RL
-- Sensor noise and state estimation
 - Domain randomization
 
 ## References

@@ -141,6 +141,29 @@ def randomize_params(base_params: Params, rng: np.random.Generator) -> Params:
             seed=gust_seed,
         )
 
+    # --- estimator params (guarded) ------------------------------------------
+    est_kw: dict = {}
+    if getattr(base_params, "use_estimator", False):
+        est_kw["use_estimator"] = True
+        if hasattr(base_params, "estimator_params"):
+            est_kw["estimator_params"] = base_params.estimator_params
+        # Randomize sensor seed per trial
+        from quad.sensors import SensorParams as _SP
+        sp = getattr(base_params, "sensor_params", _SP())
+        est_kw["sensor_params"] = _SP(
+            gyro_noise_std=sp.gyro_noise_std,
+            accel_noise_std=sp.accel_noise_std,
+            gyro_bias_rw_std=sp.gyro_bias_rw_std,
+            accel_bias_rw_std=sp.accel_bias_rw_std,
+            alt_enabled=sp.alt_enabled,
+            alt_noise_std=sp.alt_noise_std,
+            alt_rate_hz=sp.alt_rate_hz,
+            posfix_enabled=sp.posfix_enabled,
+            posfix_noise_std=sp.posfix_noise_std,
+            posfix_rate_hz=sp.posfix_rate_hz,
+            seed=int(rng.integers(0, 2**31)),
+        )
+
     return Params(
         m=m,
         J=J,
@@ -155,6 +178,7 @@ def randomize_params(base_params: Params, rng: np.random.Generator) -> Params:
         drag_coeff=base_params.drag_coeff,
         **act_kw,
         **wind_kw,
+        **est_kw,
     )
 
 

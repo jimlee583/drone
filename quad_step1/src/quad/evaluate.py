@@ -33,6 +33,7 @@ def run_evaluation(
     seed: int = 42,
     output_dir: str = "results",
     verbose: bool = False,
+    use_estimator: bool = False,
 ) -> list[dict]:
     """Run Monte Carlo evaluation for a given scenario.
 
@@ -42,12 +43,15 @@ def run_evaluation(
         seed: Master RNG seed for reproducibility.
         output_dir: Directory for output CSV / JSON files.
         verbose: Print per-trial progress.
+        use_estimator: If True, run controller from EKF-estimated state.
 
     Returns:
         List of per-trial metric dicts.
     """
     scenario = get_scenario(scenario_name)
     base_params = default_params()
+    if use_estimator:
+        base_params.use_estimator = True
     rng = np.random.default_rng(seed)
 
     out_path = Path(output_dir)
@@ -253,6 +257,10 @@ def main() -> None:
         "--list-scenarios", action="store_true",
         help="List available scenarios and exit.",
     )
+    parser.add_argument(
+        "--use-estimator", action="store_true",
+        help="Run controller off EKF-estimated state.",
+    )
 
     args = parser.parse_args()
 
@@ -272,6 +280,7 @@ def main() -> None:
         seed=args.seed,
         output_dir=args.out,
         verbose=args.verbose,
+        use_estimator=args.use_estimator,
     )
 
 
