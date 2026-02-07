@@ -144,7 +144,7 @@ def aggressive_params() -> Params:
         kp_pos=np.array([10.0, 10.0, 12.0]),
         kd_pos=np.array([6.0, 6.0, 7.0]),
         kr_att=np.array([0.15, 0.15, 0.08]),
-        kw_rate=np.array([0.015, 0.015, 0.008]),
+        kw_rate=np.array([0.03, 0.03, 0.016]),
     )
 
 
