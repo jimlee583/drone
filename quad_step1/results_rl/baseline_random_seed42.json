@@ -1,0 +1,68 @@
+{
+  "policy": "random",
+  "episodes": 5,
+  "seed": 42,
+  "return_mean": -100.72629126940828,
+  "return_std": 0.43989888038928193,
+  "success_rate": 0.0,
+  "crash_rate": 1.0,
+  "mean_episode_length": 71.8,
+  "wall_time_s": 0.57563162498991,
+  "per_episode": [
+    {
+      "seed": 42,
+      "steps": 48,
+      "total_reward": -100.19520339673977,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 2.399999999999971
+    },
+    {
+      "seed": 43,
+      "steps": 86,
+      "total_reward": -101.30250076465157,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 4.2999999999999305
+    },
+    {
+      "seed": 44,
+      "steps": 90,
+      "total_reward": -100.94028241001082,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 4.499999999999926
+    },
+    {
+      "seed": 45,
+      "steps": 83,
+      "total_reward": -100.96695204953521,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 4.149999999999934
+    },
+    {
+      "seed": 46,
+      "steps": 52,
+      "total_reward": -100.22651772610396,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 2.599999999999967
+    }
+  ]
+}

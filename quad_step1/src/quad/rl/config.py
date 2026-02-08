@@ -82,7 +82,7 @@ class PPOConfig:
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
     policy_kwargs: Dict[str, Any] = field(
-        default_factory=lambda: {"net_arch": [dict(pi=[64, 64], vf=[64, 64])]}
+        default_factory=lambda: {"net_arch": dict(pi=[64, 64], vf=[64, 64])}
     )
 
     # Callbacks

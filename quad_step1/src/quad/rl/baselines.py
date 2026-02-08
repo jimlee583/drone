@@ -264,7 +264,7 @@ def main() -> None:
     ]
     _apply_overrides(rc, args, run_keys)
 
-    seed = rc.seed if rc.seed != 0 else (args.seed if args.seed is not None else 0)
+    seed = rc.seed
 
     run_baseline(
         policy_name=args.policy,

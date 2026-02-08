@@ -290,7 +290,7 @@ def main() -> None:
     ]
     _apply_overrides(rc, args, run_keys)
 
-    seed = rc.seed if rc.seed != 0 else 0
+    seed = rc.seed
 
     evaluate_model(
         model_path=args.model_path,
