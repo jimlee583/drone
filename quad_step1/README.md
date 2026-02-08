@@ -283,10 +283,59 @@ python -m quad.evaluate --scenario hover --trials 5 --seed 1
 Sensor noise is seeded via `SensorParams.seed` (default 0).  During Monte
 Carlo evaluation the seed is randomized per trial automatically.
 
-## Future Extensions (Step 4+)
+## RL (Stable-Baselines3)
 
-- Gym environment wrapper for RL
+Reinforcement-learning tooling lives in `src/quad/rl/` and is fully optional.
+
+### Install extras
+
+```bash
+cd quad_step1
+uv sync --extra rl
+# or with pip:
+pip install -e ".[rl]"
+```
+
+### Baseline evaluation (no learning)
+
+```bash
+# Zero-action policy (pure SE(3) baseline follows waypoints)
+uv run python -m quad.rl.baselines --policy zero --episodes 10 --seed 1
+
+# Random-action policy
+uv run python -m quad.rl.baselines --policy random --episodes 10 --seed 1
+```
+
+### PPO training
+
+```bash
+# Basic training (circle track, 300k steps, 4 parallel envs)
+uv run python -m quad.rl.train_ppo --track circle --total-timesteps 300000 --seed 1 --num-envs 4
+
+# Figure-8 track with EKF estimator
+uv run python -m quad.rl.train_ppo --track figure8 --use-estimator --total-timesteps 500000 --seed 42
+```
+
+Models are saved to `models/<run_name>/` and TensorBoard logs to `runs/<run_name>/`.
+
+### TensorBoard
+
+```bash
+uv run tensorboard --logdir runs
+```
+
+### Evaluate a trained model
+
+```bash
+uv run python -m quad.rl.eval_sb3 --model-path models/<run_name>/best_model.zip --episodes 50 --seed 123
+```
+
+Results (success rate, return mean/std, crash rate) are saved to `results_rl/`.
+
+## Future Extensions (Step 5+)
+
 - Domain randomization
+- Curriculum learning
 
 ## References
 

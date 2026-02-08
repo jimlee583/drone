@@ -27,3 +27,8 @@ venv/
 
 # Evaluation results
 results/
+
+# RL training outputs
+/runs/
+/models/
+/results_rl/
