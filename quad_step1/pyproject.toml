@@ -24,6 +24,8 @@ dev = [
 ]
 rl = [
     "gymnasium>=0.29",
+    "stable-baselines3>=2.3.0",
+    "tensorboard>=2.12",
 ]
 
 [tool.setuptools.packages.find]
