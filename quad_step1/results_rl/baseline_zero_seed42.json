@@ -1,0 +1,46 @@
+{
+  "policy": "zero",
+  "episodes": 3,
+  "seed": 42,
+  "return_mean": -100.46453119669614,
+  "return_std": 0.08602159396054324,
+  "success_rate": 0.0,
+  "crash_rate": 1.0,
+  "mean_episode_length": 48.333333333333336,
+  "wall_time_s": 0.3250258330081124,
+  "per_episode": [
+    {
+      "seed": 42,
+      "steps": 49,
+      "total_reward": -100.5179030328749,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 2.44999999999997
+    },
+    {
+      "seed": 43,
+      "steps": 49,
+      "total_reward": -100.34317132617817,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 2.44999999999997
+    },
+    {
+      "seed": 44,
+      "steps": 47,
+      "total_reward": -100.53251923103532,
+      "wps_reached": 1,
+      "laps_done": 0,
+      "terminated": true,
+      "truncated": false,
+      "term_reason": "crash",
+      "sim_time": 2.349999999999972
+    }
+  ]
+}
