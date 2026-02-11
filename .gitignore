@@ -29,6 +29,6 @@ venv/
 results/
 
 # RL training outputs
-/runs/
-/models/
-/results_rl/
+runs/
+models/
+results_rl/
