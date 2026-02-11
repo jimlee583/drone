@@ -80,6 +80,13 @@ def _make_base_env_config(ec: EnvConfig) -> _BaseEnvConfig:
         tilt_limit_deg=ec.tilt_limit_deg,
         use_estimator=ec.use_estimator,
         render_every=ec.render_every,
+        # Gate mode
+        use_gates=ec.use_gates,
+        gate_radius_m=ec.gate_radius_m,
+        gate_half_thickness_m=ec.gate_half_thickness_m,
+        R_gate=ec.R_gate,
+        terminate_on_wrong_direction=ec.terminate_on_wrong_direction,
+        terminate_on_gate_miss=ec.terminate_on_gate_miss,
     )
 
 

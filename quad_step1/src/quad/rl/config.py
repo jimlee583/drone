@@ -60,6 +60,14 @@ class EnvConfig:
     use_estimator: bool = False
     render_every: int = 50
 
+    # Gate mode
+    use_gates: bool = False
+    gate_radius_m: float = 0.5
+    gate_half_thickness_m: float = 0.2
+    R_gate: float = 10.0
+    terminate_on_wrong_direction: bool = False
+    terminate_on_gate_miss: bool = False
+
 
 # ---------------------------------------------------------------------------
 # PPO hyper-parameters
@@ -154,6 +162,14 @@ def _add_env_args(parser: argparse.ArgumentParser) -> None:
     g.add_argument("--yaw-rate-max", type=float, default=None)
     g.add_argument("--use-estimator", action="store_true", default=None)
     g.add_argument("--no-estimator", dest="use_estimator", action="store_false")
+    g.add_argument("--use-gates", action="store_true", default=None,
+                   help="Enable gate-plane mode (default: waypoint mode)")
+    g.add_argument("--no-gates", dest="use_gates", action="store_false")
+    g.add_argument("--gate-radius", type=float, default=None, dest="gate_radius_m",
+                   help="Gate opening radius [m]")
+    g.add_argument("--gate-half-thickness", type=float, default=None,
+                   dest="gate_half_thickness_m",
+                   help="Gate slab half-thickness [m]")
 
 
 def _add_ppo_args(parser: argparse.ArgumentParser) -> None:
@@ -220,6 +236,7 @@ def load_config_from_args(
         "track", "track_radius", "track_z", "track_n_pts", "wp_radius",
         "n_laps", "dt_sim", "control_decimation", "max_steps",
         "a_residual_max", "yaw_rate_max", "use_estimator",
+        "use_gates", "gate_radius_m", "gate_half_thickness_m",
     ]
     _apply_overrides(cfg.env, args, env_keys)
 

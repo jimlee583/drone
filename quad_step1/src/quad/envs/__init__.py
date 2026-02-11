@@ -15,6 +15,8 @@ from quad.envs.track import (
     figure8_track,
     line_track,
 )
+from quad.envs.gates import Gate, gate_from_waypoint, waypoints_to_gates
+from quad.envs.gate_track import GateTrack
 
 __all__ = [
     "QuadRacingEnv",
@@ -22,4 +24,8 @@ __all__ = [
     "circle_track",
     "figure8_track",
     "line_track",
+    "Gate",
+    "GateTrack",
+    "gate_from_waypoint",
+    "waypoints_to_gates",
 ]
