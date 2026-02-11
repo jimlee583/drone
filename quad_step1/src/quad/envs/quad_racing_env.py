@@ -411,7 +411,9 @@ class QuadRacingEnv(gym.Env):
 
         # --- Run sim for control_decimation steps ---
         dt = self.cfg.dt_sim
-        prev_pos = self._state.p.copy()   # truth position before sim
+        # NOTE: crossing detection & progress reward use truth position
+        # (not the EKF estimate) — this is intentional sim-to-real design.
+        prev_pos = self._state.p.copy()
         for _ in range(self.cfg.control_decimation):
             self._sim_step(traj, dt)
 
