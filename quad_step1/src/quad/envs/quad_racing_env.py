@@ -30,6 +30,10 @@ from quad.math3d import quat_to_R
 # Track --------------------------------------------------------------------
 from quad.envs.track import WaypointTrack, circle_track
 
+# Gate-plane track (lazy-used only when use_gates=True) --------------------
+from quad.envs.gates import Gate, waypoints_to_gates
+from quad.envs.gate_track import GateTrack
+
 
 # ---------------------------------------------------------------------------
 # Environment config (plain dataclass so it stays JSON-friendly later)
@@ -122,6 +126,14 @@ class EnvConfig:
     use_estimator: bool = False
     render_every: int = 50
 
+    # Gate mode (all defaults preserve existing waypoint behaviour)
+    use_gates: bool = False
+    gate_radius_m: float = 0.5
+    gate_half_thickness_m: float = 0.2
+    R_gate: float = 10.0               # bonus per successful gate crossing
+    terminate_on_wrong_direction: bool = False
+    terminate_on_gate_miss: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Observation helpers
@@ -165,6 +177,53 @@ def _obs_space() -> spaces.Box:
 
 
 # ---------------------------------------------------------------------------
+# Gate-mode observation helpers
+# ---------------------------------------------------------------------------
+# Layout (same dimension as waypoint mode for drop-in compatibility):
+#   [0:3]   vector to current gate centre   (center - p)
+#   [3:6]   velocity (world frame)
+#   [6:9]   body z-axis in world frame      (R @ e3)
+#   [9:12]  body angular rates
+#   [12:15] current gate normal             (direction of travel)
+#
+# The policy can recover the signed distance as
+#   d = -dot(obs[12:15], obs[0:3])
+# and the lateral error as
+#   ||obs[0:3] + d * obs[12:15]||
+# so no extra dimensions are needed.
+
+GATE_OBS_DIM = OBS_DIM  # 15 — intentionally kept identical
+
+
+def _build_gate_obs(
+    state: State,
+    gate_track: GateTrack,
+) -> NDArray[np.float32]:
+    """Construct a flat float32 observation for gate-plane mode."""
+    R = quat_to_R(state.q)
+    e3 = np.array([0.0, 0.0, 1.0])
+    b3 = R @ e3  # body z in world frame
+
+    gate = gate_track.current_gate()
+    gate_rel = gate.center_w - state.p   # vector from drone to gate centre
+
+    obs = np.concatenate([
+        gate_rel,            # 3
+        state.v,             # 3
+        b3,                  # 3
+        state.w_body,        # 3
+        gate.normal_w,       # 3
+    ]).astype(np.float32)
+
+    return obs
+
+
+def _gate_obs_space() -> spaces.Box:
+    hi = np.full(GATE_OBS_DIM, 200.0, dtype=np.float32)
+    return spaces.Box(low=-hi, high=hi, dtype=np.float32)
+
+
+# ---------------------------------------------------------------------------
 # QuadRacingEnv
 # ---------------------------------------------------------------------------
 
@@ -199,6 +258,7 @@ class QuadRacingEnv(gym.Env):
         params: Optional[Params] = None,
         config: Optional[EnvConfig] = None,
         render_mode: Optional[str] = None,
+        gate_track: Optional[GateTrack] = None,
     ):
         super().__init__()
 
@@ -208,8 +268,29 @@ class QuadRacingEnv(gym.Env):
         self._track_template = track or circle_track()
         self.render_mode = render_mode
 
+        # Gate mode: build gate track from waypoints (or accept explicit one)
+        self._gate_track_template: Optional[GateTrack] = None
+        if self.cfg.use_gates:
+            if gate_track is not None:
+                self._gate_track_template = gate_track
+            else:
+                # Auto-convert waypoint track → gate list
+                gates = waypoints_to_gates(
+                    self._track_template.waypoints,
+                    radius_m=self.cfg.gate_radius_m,
+                    half_thickness_m=self.cfg.gate_half_thickness_m,
+                    closed=(self._track_template.n_laps >= 1),
+                )
+                self._gate_track_template = GateTrack(
+                    gates=gates,
+                    n_laps=self._track_template.n_laps,
+                )
+
         # Gymnasium spaces
-        self.observation_space = _obs_space()
+        if self.cfg.use_gates:
+            self.observation_space = _gate_obs_space()
+        else:
+            self.observation_space = _obs_space()
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(4,), dtype=np.float32,
         )
@@ -219,10 +300,13 @@ class QuadRacingEnv(gym.Env):
         self._act_state: Optional[ActuatorState] = None
         self._dist_state: Optional[DisturbanceState] = None
         self._track: Optional[WaypointTrack] = None
+        self._gate_track: Optional[GateTrack] = None
+        self._prev_pos: Optional[NDArray] = None   # for gate crossing detection
         self._step_count: int = 0
         self._sim_time: float = 0.0
         self._total_reward: float = 0.0
         self._wps_reached: int = 0
+        self._gates_passed: int = 0
         self._np_random: Optional[np.random.Generator] = None
 
         # Estimator state (lazy-initialised if needed)
@@ -261,7 +345,14 @@ class QuadRacingEnv(gym.Env):
         offset[2] = 0.0  # don't randomise altitude much
 
         self._state = State.zeros()
-        self._state.p = wp0.copy() + offset
+
+        if self.cfg.use_gates and self._gate_track_template is not None:
+            # Place the drone *behind* the first gate so it approaches from
+            # the negative-d side and has to fly through.
+            gate0 = self._gate_track_template.gates[0]
+            self._state.p = gate0.center_w.copy() - gate0.normal_w * 1.0 + offset
+        else:
+            self._state.p = wp0.copy() + offset
 
         self._act_state = ActuatorState.from_hover(self.params.hover_thrust)
         self._dist_state = DisturbanceState.create(
@@ -273,6 +364,13 @@ class QuadRacingEnv(gym.Env):
         self._sim_time = 0.0
         self._total_reward = 0.0
         self._wps_reached = 0
+        self._gates_passed = 0
+        self._prev_pos = self._state.p.copy()
+
+        # Gate track
+        if self.cfg.use_gates and self._gate_track_template is not None:
+            self._gate_track = self._gate_track_template.copy()
+            self._gate_track.reset(self._state.p)
 
         # Estimator
         if self.cfg.use_estimator:
@@ -313,18 +411,45 @@ class QuadRacingEnv(gym.Env):
 
         # --- Run sim for control_decimation steps ---
         dt = self.cfg.dt_sim
+        prev_pos = self._state.p.copy()   # truth position before sim
         for _ in range(self.cfg.control_decimation):
             self._sim_step(traj, dt)
 
-        # --- Track progress ---
-        progress, wp_reached = self._track.update(self._state.p)
+        new_pos = self._state.p  # truth position after sim
+
+        # --- Track progress (gate mode vs. waypoint mode) ---
+        gate_crossed = False
+        gate_wrong_dir = False
+        gate_lateral_miss = False
+
+        if self.cfg.use_gates and self._gate_track is not None:
+            # Signed-distance progress (relative to current gate BEFORE any advance)
+            prev_d = self._gate_track.signed_distance(prev_pos)
+            new_d = self._gate_track.signed_distance(new_pos)
+            progress = new_d - prev_d  # positive → moving through gate
+
+            # Crossing detection (may advance gate index)
+            result = self._gate_track.advance_if_crossed(prev_pos, new_pos)
+            gate_crossed = result.crossed
+            gate_wrong_dir = result.wrong_dir
+            gate_lateral_miss = result.lateral_miss
+
+            if gate_crossed:
+                self._gates_passed += 1
+            wp_reached = gate_crossed
+        else:
+            progress, wp_reached = self._track.update(self._state.p)
+
         if wp_reached:
             self._wps_reached += 1
 
+        self._prev_pos = new_pos.copy()
         self._step_count += 1
 
         # --- Reward ---
         reward = self._compute_reward(progress, action, wp_reached)
+        if self.cfg.use_gates and gate_crossed:
+            reward += self.cfg.R_gate
         self._total_reward += reward
 
         # --- Termination / truncation ---
@@ -337,6 +462,22 @@ class QuadRacingEnv(gym.Env):
             reward -= self.cfg.R_crash
             self._total_reward -= self.cfg.R_crash
             term_reason = "crash"
+        elif self.cfg.use_gates and self._gate_track is not None:
+            if self._gate_track.done:
+                terminated = True
+                reward += self.cfg.R_success
+                self._total_reward += self.cfg.R_success
+                term_reason = "success"
+            elif gate_wrong_dir and self.cfg.terminate_on_wrong_direction:
+                terminated = True
+                reward -= self.cfg.R_crash
+                self._total_reward -= self.cfg.R_crash
+                term_reason = "wrong_direction"
+            elif gate_lateral_miss and self.cfg.terminate_on_gate_miss:
+                terminated = True
+                reward -= self.cfg.R_crash
+                self._total_reward -= self.cfg.R_crash
+                term_reason = "gate_miss"
         elif self._track.done:
             terminated = True
             reward += self.cfg.R_success
@@ -386,6 +527,9 @@ class QuadRacingEnv(gym.Env):
             x_obs = get_estimated_state(self._est_state, self._last_gyro)
         else:
             x_obs = self._state
+
+        if self.cfg.use_gates and self._gate_track is not None:
+            return _build_gate_obs(x_obs, self._gate_track)
         return _build_obs(x_obs, self._track)
 
     # ------------------------------------------------------------------
@@ -393,8 +537,14 @@ class QuadRacingEnv(gym.Env):
     def _baseline_setpoint(
         self,
     ) -> Tuple[NDArray, NDArray, NDArray, float, float]:
-        """Simple PD to compute desired (p, v, a, yaw, yaw_rate) from WP."""
-        wp = self._track.current_waypoint
+        """Simple PD to compute desired (p, v, a, yaw, yaw_rate) from WP/gate."""
+        if self.cfg.use_gates and self._gate_track is not None:
+            gate = self._gate_track.current_gate()
+            # Target a point slightly *past* the gate centre so the PD
+            # drives the drone through the plane rather than hovering at it.
+            wp = gate.center_w + gate.normal_w * 1.0
+        else:
+            wp = self._track.current_waypoint
         if self.cfg.use_estimator and self._est_state is not None:
             from quad.estimator_ekf import get_estimated_state
             x_base = get_estimated_state(self._est_state, self._last_gyro)
@@ -565,16 +715,32 @@ class QuadRacingEnv(gym.Env):
 
     def _info(self) -> Dict[str, Any]:
         p = self._state.p if self._state is not None else np.zeros(3)
-        dist = float(np.linalg.norm(self._track.current_waypoint - p)) if self._track else 0.0
-        return {
+
+        if self.cfg.use_gates and self._gate_track is not None:
+            gate = self._gate_track.current_gate()
+            dist = float(np.linalg.norm(gate.center_w - p))
+            laps = self._gate_track.laps_done
+        else:
+            dist = float(np.linalg.norm(self._track.current_waypoint - p)) if self._track else 0.0
+            laps = self._track.laps_done if self._track else 0
+
+        info: Dict[str, Any] = {
             "sim_time": self._sim_time,
             "step_count": self._step_count,
             "total_reward": self._total_reward,
             "wps_reached": self._wps_reached,
-            "laps_done": self._track.laps_done if self._track else 0,
+            "laps_done": laps,
             "dist_to_wp": dist,
             "position": p.copy(),
         }
+
+        if self.cfg.use_gates and self._gate_track is not None:
+            info["gates_passed"] = self._gates_passed
+            info["current_gate_idx"] = self._gate_track.current_gate_idx
+            info["n_gates"] = self._gate_track.n_gates
+            info["signed_dist"] = self._gate_track.signed_distance(p)
+
+        return info
 
     # ------------------------------------------------------------------
     # Rendering
@@ -582,23 +748,38 @@ class QuadRacingEnv(gym.Env):
 
     def _render_human(self) -> None:
         info = self._info()
-        print(
+        pos = info["position"]
+        base = (
             f"[step {info['step_count']:5d}]  "
             f"t={info['sim_time']:6.2f}s  "
-            f"pos=({info['position'][0]:+6.2f}, {info['position'][1]:+6.2f}, {info['position'][2]:+6.2f})  "
+            f"pos=({pos[0]:+6.2f}, {pos[1]:+6.2f}, {pos[2]:+6.2f})  "
             f"dist_wp={info['dist_to_wp']:.2f}m  "
-            f"wp_idx={self._track.current_wp}/{self._track.n_waypoints}  "
-            f"wps={info['wps_reached']}  "
-            f"R={info['total_reward']:+8.2f}"
         )
+        if self.cfg.use_gates and self._gate_track is not None:
+            base += (
+                f"gate={info['current_gate_idx']}/{info['n_gates']}  "
+                f"gates_passed={info['gates_passed']}  "
+                f"d={info['signed_dist']:+.2f}  "
+            )
+        else:
+            base += (
+                f"wp_idx={self._track.current_wp}/{self._track.n_waypoints}  "
+                f"wps={info['wps_reached']}  "
+            )
+        base += f"R={info['total_reward']:+8.2f}"
+        print(base)
 
     def _render_ansi(self) -> str:
         info = self._info()
-        return (
+        s = (
             f"step={info['step_count']} "
             f"t={info['sim_time']:.2f} "
             f"pos={info['position']} "
             f"dist={info['dist_to_wp']:.2f} "
-            f"wps={info['wps_reached']} "
-            f"R={info['total_reward']:.2f}"
         )
+        if self.cfg.use_gates and self._gate_track is not None:
+            s += f"gates_passed={info['gates_passed']} "
+        else:
+            s += f"wps={info['wps_reached']} "
+        s += f"R={info['total_reward']:.2f}"
+        return s

@@ -73,6 +73,13 @@ def _make_base_env_config(ec: EnvConfig) -> _BaseEnvConfig:
         tilt_limit_deg=ec.tilt_limit_deg,
         use_estimator=ec.use_estimator,
         render_every=ec.render_every,
+        # Gate mode
+        use_gates=ec.use_gates,
+        gate_radius_m=ec.gate_radius_m,
+        gate_half_thickness_m=ec.gate_half_thickness_m,
+        R_gate=ec.R_gate,
+        terminate_on_wrong_direction=ec.terminate_on_wrong_direction,
+        terminate_on_gate_miss=ec.terminate_on_gate_miss,
     )
 
 
@@ -254,6 +261,7 @@ def main() -> None:
         "track", "track_radius", "track_z", "track_n_pts", "wp_radius",
         "n_laps", "dt_sim", "control_decimation", "max_steps",
         "a_residual_max", "yaw_rate_max", "use_estimator",
+        "use_gates", "gate_radius_m", "gate_half_thickness_m",
     ]
     _apply_overrides(ec, args, env_keys)
 

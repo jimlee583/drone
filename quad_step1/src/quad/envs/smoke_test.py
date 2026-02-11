@@ -6,9 +6,10 @@ Run with::
     python -m quad.envs.smoke_test
     uv run python -m quad.envs.smoke_test
 
-Runs two short episodes:
+Runs three short episodes:
   1. Zero-action policy (pure SE(3) baseline follows waypoints)
   2. Random-action policy
+  3. Zero-action policy in **gate mode** (gate-plane crossing task)
 and prints a summary for each.  No plots, no GUI.
 """
 
@@ -123,6 +124,43 @@ def main() -> None:
 
     env.close()
 
+    # ---------------------------------------------------------------
+    # Gate-mode smoke test
+    # ---------------------------------------------------------------
+    print("\n" + "=" * 55)
+    print("  Gate-mode smoke test (zero policy)")
+    print("=" * 55)
+
+    gate_cfg = EnvConfig(
+        dt_sim=0.005,
+        control_decimation=10,
+        max_steps=500,
+        use_gates=True,
+        gate_radius_m=2.0,      # generous radius so the zero policy can pass
+        gate_half_thickness_m=0.3,
+    )
+    gate_env = QuadRacingEnv(track=track, config=gate_cfg, render_mode="human")
+
+    t0 = time.monotonic()
+    result_gate = _run_episode(gate_env, policy="zero", max_steps=400)
+    wall_gate = time.monotonic() - t0
+    _print_summary(result_gate)
+    print(f"  Wall-clock time : {wall_gate:.2f} s")
+
+    # Print gate-specific info from the last info dict
+    obs_g, info_g = gate_env.reset(seed=0)
+    # Re-run briefly just to get the info with gate fields
+    for _ in range(5):
+        obs_g, _, _, _, info_g = gate_env.step(
+            np.zeros(gate_env.action_space.shape, dtype=np.float32)
+        )
+    gates_passed = info_g.get("gates_passed", "n/a")
+    n_gates = info_g.get("n_gates", "n/a")
+    print(f"  Gates passed    : {result_gate.get('wps_reached', gates_passed)}")
+    print(f"  Total gates     : {n_gates}")
+
+    gate_env.close()
+
     # --- Final verdict ---
     print("\n" + "=" * 55)
     ok = True
@@ -135,6 +173,9 @@ def main() -> None:
     if result_zero["wps_reached"] == 0:
         print("  [WARN] Zero-policy reached 0 waypoints.")
         # Not necessarily a failure if the track is large
+    if result_gate["term_reason"] == "crash":
+        print("  [WARN] Gate-mode zero-policy crashed.")
+        ok = False
 
     if ok:
         print("  [OK] Smoke test completed successfully.")
