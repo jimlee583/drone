@@ -158,6 +158,9 @@ class GateTrack:
         d_new = gate.signed_distance(new_pos)
         ht = gate.half_thickness_m
 
+        # Snapshot before update (needed for wrong-direction guard)
+        was_behind_pre = self._was_behind
+
         # --- Update hysteresis flags ---
         if d_prev < -ht or d_new < -ht:
             self._was_behind = True
@@ -179,16 +182,18 @@ class GateTrack:
 
             if lateral <= gate.radius_m:
                 crossed = True
+                # Full reset — successful crossing completes the approach
+                self._was_behind = False
+                self._was_ahead = False
             else:
                 lateral_miss = True
-            # Reset hysteresis regardless (we've exited the approach)
-            self._was_behind = False
-            self._was_ahead = False
+                # Keep _was_behind so re-approach works; clear _was_ahead
+                self._was_ahead = False
 
         # ------------------------------------------------------------------
         # Wrong-direction crossing: was solidly past → now behind
         # ------------------------------------------------------------------
-        elif self._was_ahead and d_new < -ht and not self._was_behind:
+        elif self._was_ahead and d_new < -ht and not was_behind_pre:
             wrong_dir = True
             # Reset
             self._was_ahead = False
