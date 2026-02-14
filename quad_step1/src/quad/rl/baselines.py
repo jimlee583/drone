@@ -510,6 +510,16 @@ def main() -> None:
     )
 
     _add_env_args(parser)
+    # Override wp-radius default for baseline evaluation (EnvConfig default is 0.5)
+    for _act in parser._actions:
+        if '--wp-radius' in getattr(_act, 'option_strings', []):
+            _act.default = 1.5
+            _act.help = (
+                "Waypoint capture radius in meters (default 1.5 for stable "
+                "baseline evaluation). Smaller values such as 0.5 increase "
+                "difficulty and may cause aggressive turning."
+            )
+            break
     _add_run_args(parser)
     args = parser.parse_args()
 
