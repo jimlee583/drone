@@ -13,7 +13,9 @@ Usage::
 
 from __future__ import annotations
 
+import collections
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -84,6 +86,96 @@ def _make_base_env_config(ec: EnvConfig) -> _BaseEnvConfig:
 
 
 # ---------------------------------------------------------------------------
+# Trace helpers
+# ---------------------------------------------------------------------------
+
+_TRACE_TAIL_LEN = 50  # max env steps kept in the tail trace
+
+
+def _rl(arr, n: int | None = None) -> list:
+    """Convert ndarray to a rounded JSON-friendly list of floats."""
+    a = np.asarray(arr, dtype=np.float64).ravel()
+    if n is not None:
+        a = a[:n]
+    return [round(float(x), 6) for x in a]
+
+
+# ---------------------------------------------------------------------------
+# Episode config snapshot
+# ---------------------------------------------------------------------------
+
+def _try_git_commit() -> str | None:
+    """Best-effort short git SHA (returns *None* on any failure)."""
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        )
+        return out.decode().strip() or None
+    except Exception:
+        return None
+
+
+def _build_episode_config(
+    policy: str,
+    seed: int,
+    episodes: int,
+    ec: EnvConfig,
+    env: QuadRacingEnv,
+    run_name: str = "",
+) -> Dict[str, Any]:
+    """Build a compact, JSON-serializable config snapshot for one episode."""
+    cfg: Dict[str, Any] = {}
+
+    # 1) Core run settings
+    cfg["policy"] = policy
+    cfg["seed"] = seed
+    cfg["episodes"] = episodes
+    if run_name:
+        cfg["run_name"] = run_name
+    git_sha = _try_git_commit()
+    if git_sha:
+        cfg["git_commit"] = git_sha
+
+    # 2) Track / task settings
+    cfg["track"] = ec.track
+    cfg["track_radius"] = float(ec.track_radius)
+    cfg["track_z"] = float(ec.track_z)
+    cfg["track_n_pts"] = int(ec.track_n_pts)
+    cfg["wp_radius"] = float(ec.wp_radius)
+    cfg["n_laps"] = int(ec.n_laps)
+    cfg["use_gates"] = bool(ec.use_gates)
+    cfg["gate_radius_m"] = float(ec.gate_radius_m)
+    cfg["gate_half_thickness_m"] = float(ec.gate_half_thickness_m)
+
+    # 3) Timing settings
+    cfg["dt_sim"] = float(ec.dt_sim)
+    cfg["control_decimation"] = int(ec.control_decimation)
+    cfg["max_steps"] = int(ec.max_steps)
+
+    # 4) Action space limits
+    cfg["a_residual_max"] = float(ec.a_residual_max)
+    cfg["yaw_rate_max"] = float(ec.yaw_rate_max)
+
+    # 5) Estimation toggle
+    cfg["use_estimator"] = bool(ec.use_estimator)
+
+    # 6) Termination thresholds
+    cfg["tilt_limit_deg"] = float(ec.tilt_limit_deg)
+    cfg["pos_limit_m"] = float(ec.pos_limit)
+
+    # 7) Disturbance toggles (from the env's physics Params)
+    wp = env.params.wind
+    cfg["wind_enabled"] = bool(wp.enabled)
+    if wp.enabled:
+        cfg["wind_mean_mps"] = [round(float(v), 6) for v in wp.wind_vel]
+        cfg["gust_enabled"] = bool(wp.gust_std > 0)
+
+    return cfg
+
+
+# ---------------------------------------------------------------------------
 # Run a single episode
 # ---------------------------------------------------------------------------
 
@@ -98,6 +190,12 @@ def _run_episode(
     terminated = False
     truncated = False
     term_reason = ""
+    last_action = np.zeros(env.action_space.shape, dtype=np.float32)
+
+    # Ring buffer for compact tail trace (last N env steps)
+    trace: collections.deque[Dict[str, Any]] = collections.deque(
+        maxlen=_TRACE_TAIL_LEN,
+    )
 
     while True:
         if policy == "zero":
@@ -111,11 +209,46 @@ def _run_episode(
         total_reward += reward
         steps += 1
 
+        # --- Build trace entry ---
+        entry: Dict[str, Any] = {
+            "k": steps,
+            "t": round(info.get("sim_time", 0.0), 6),
+            "reward": round(float(reward), 6),
+            "terminated": terminated,
+            "truncated": truncated,
+            "pos": _rl(info["position"]),
+            "action": _rl(action),
+        }
+        vel = info.get("vel")
+        if vel is not None:
+            entry["vel"] = _rl(vel)
+        # Gate context
+        if "current_gate_idx" in info:
+            entry["gate_idx"] = info["current_gate_idx"]
+            if "d_plane" in info:
+                entry["d_plane"] = round(float(info["d_plane"]), 6)
+            if "lateral_m" in info:
+                entry["lateral_m"] = round(float(info["lateral_m"]), 6)
+            for flag in ("crossed", "wrong_dir", "lateral_miss"):
+                if info.get(flag):
+                    entry[flag] = True
+        elif "wp_idx" in info:
+            entry["wp_idx"] = info["wp_idx"]
+            entry["dist_wp"] = round(float(info.get("dist_to_wp", 0.0)), 6)
+        # Term code on the terminal step only
+        if terminated or truncated:
+            tc = info.get("term_code")
+            if tc:
+                entry["term_code"] = tc
+        trace.append(entry)
+
         if terminated or truncated:
             term_reason = info.get("term_reason", "unknown")
+            last_action = action
             break
 
-    return {
+    # === Build per-episode record (backward-compatible base) ===
+    rec: Dict[str, Any] = {
         "seed": seed,
         "steps": steps,
         "total_reward": float(total_reward),
@@ -126,6 +259,71 @@ def _run_episode(
         "term_reason": term_reason,
         "sim_time": float(info.get("sim_time", 0.0)),
     }
+
+    # --- Termination detail ---
+    for key in ("term_code", "term_detail", "crash_type"):
+        val = info.get(key)
+        if val is not None:
+            rec[key] = val
+    rec["term_step"] = steps
+    rec["term_time_s"] = round(info.get("sim_time", 0.0), 6)
+
+    # --- Final state snapshot ---
+    pos = info.get("position")
+    if pos is not None:
+        rec["final_pos"] = _rl(pos)
+    vel = info.get("vel")
+    if vel is not None:
+        rec["final_vel"] = _rl(vel)
+    quat = info.get("quat")
+    if quat is not None:
+        rec["final_quat"] = _rl(quat, 4)
+    omega = info.get("omega")
+    if omega is not None:
+        rec["final_omega"] = _rl(omega)
+    rec["final_action"] = _rl(last_action)
+    for rec_key, info_key in [
+        ("final_thrust_cmd", "thrust_cmd"),
+        ("final_thrust_applied", "thrust_applied"),
+    ]:
+        val = info.get(info_key)
+        if val is not None:
+            rec[rec_key] = round(float(val), 6)
+    for rec_key, info_key in [
+        ("final_moments_cmd", "moments_cmd"),
+        ("final_moments_applied", "moments_applied"),
+    ]:
+        val = info.get(info_key)
+        if val is not None:
+            rec[rec_key] = _rl(val)
+
+    # --- Gate / track context at termination ---
+    if "current_gate_idx" in info:
+        rec["gate_idx"] = info["current_gate_idx"]
+        rec["gates_passed"] = int(info.get("gates_passed", 0))
+        if "d_plane" in info:
+            rec["d_plane"] = round(float(info["d_plane"]), 6)
+        if "lateral_m" in info:
+            rec["lateral_m"] = round(float(info["lateral_m"]), 6)
+        if "gate_radius_m" in info:
+            rec["gate_radius_m"] = float(info["gate_radius_m"])
+        if "gate_half_thickness_m" in info:
+            rec["gate_half_thickness_m"] = float(info["gate_half_thickness_m"])
+        crossing = {}
+        for flag in ("crossed", "wrong_dir", "lateral_miss"):
+            val = info.get(flag)
+            if val is not None:
+                crossing[flag] = val
+        if crossing:
+            rec["last_crossing_flags"] = crossing
+    elif "wp_idx" in info:
+        rec["wp_idx"] = info["wp_idx"]
+        rec["dist_wp"] = round(float(info.get("dist_to_wp", 0.0)), 6)
+
+    # --- Tail trace (last N steps) ---
+    rec["trace_tail"] = list(trace)
+
+    return rec
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +337,7 @@ def run_baseline(
     env_config: EnvConfig | None = None,
     results_dir: str = "results_rl",
     verbose: bool = True,
+    run_name: str = "",
 ) -> Dict[str, Any]:
     """Run *episodes* with the given baseline policy and report statistics.
 
@@ -156,6 +355,8 @@ def run_baseline(
         Where to save the JSON summary.
     verbose : bool
         Print per-episode + aggregate info.
+    run_name : str
+        Optional human-readable run identifier.
 
     Returns
     -------
@@ -167,12 +368,25 @@ def run_baseline(
     base_cfg = _make_base_env_config(ec)
     env = QuadRacingEnv(track=track, config=base_cfg)
 
+    # Build the config snapshot once (shared across all episodes).
+    ep_config_template = _build_episode_config(
+        policy=policy_name,
+        seed=seed,
+        episodes=episodes,
+        ec=ec,
+        env=env,
+        run_name=run_name,
+    )
+
     results: List[Dict[str, Any]] = []
     t0 = time.monotonic()
 
     for i in range(episodes):
         ep_seed = seed + i
         res = _run_episode(env, policy_name, ep_seed)
+        # Stamp per-episode seed into the snapshot copy
+        ep_cfg = {**ep_config_template, "seed": ep_seed}
+        res["episode_config"] = ep_cfg
         results.append(res)
         if verbose:
             print(
@@ -281,6 +495,7 @@ def main() -> None:
         env_config=ec,
         results_dir=rc.results_dir,
         verbose=True,
+        run_name=rc.run_name,
     )
 
 
