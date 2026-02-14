@@ -35,6 +35,63 @@ from quad.rl.wrappers import wrap_env
 
 
 # ---------------------------------------------------------------------------
+# Evaluation presets (local copy — keep in sync with baselines.py if needed)
+# ---------------------------------------------------------------------------
+
+PRESETS: Dict[str, Dict[str, Any]] = {
+    "debug": {
+        "track": "circle",
+        "track_radius": 3.0,
+        "track_z": 1.5,
+        "track_n_pts": 72,
+        "wp_radius": 2.0,
+        "n_laps": 1,
+        "dt_sim": 0.005,
+        "control_decimation": 2,
+        "max_steps": 800,
+        "use_estimator": False,
+        "use_gates": False,
+        "a_residual_max": 5.0,
+        "yaw_rate_max": 2.0,
+        "verbose": 1,
+        "episodes": 10,
+    },
+    "baseline": {
+        "track": "circle",
+        "track_radius": 3.0,
+        "track_z": 1.5,
+        "track_n_pts": 12,
+        "wp_radius": 1.5,
+        "n_laps": 1,
+        "dt_sim": 0.005,
+        "control_decimation": 10,
+        "max_steps": 2000,
+        "use_estimator": False,
+        "use_gates": False,
+        "a_residual_max": 5.0,
+        "yaw_rate_max": 2.0,
+    },
+    "hard": {
+        "track": "circle",
+        "track_radius": 3.0,
+        "track_z": 1.5,
+        "track_n_pts": 12,
+        "wp_radius": 0.5,
+        "n_laps": 1,
+        "dt_sim": 0.005,
+        "control_decimation": 10,
+        "max_steps": 2000,
+        "use_estimator": True,
+        "use_gates": True,
+        "gate_radius_m": 0.5,
+        "gate_half_thickness_m": 0.2,
+        "a_residual_max": 5.0,
+        "yaw_rate_max": 2.0,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Helpers (same as train / baselines — kept local to avoid cross-imports)
 # ---------------------------------------------------------------------------
 
@@ -134,6 +191,7 @@ def evaluate_model(
     results_dir: str = "results_rl",
     deterministic: bool = True,
     verbose: bool = True,
+    preset: str = "",
 ) -> Dict[str, Any]:
     """Load a saved SB3 model and evaluate it.
 
@@ -153,6 +211,8 @@ def evaluate_model(
         Use deterministic (greedy) actions.
     verbose : bool
         Print progress and aggregate stats.
+    preset : str
+        Name of the evaluation preset used (informational, stored in results).
 
     Returns
     -------
@@ -185,6 +245,8 @@ def evaluate_model(
         print(f"\n{'=' * 60}")
         print(f"  SB3 Evaluation — {model_path.name}")
         print(f"{'=' * 60}")
+        if preset:
+            print(f"  Preset      : {preset}")
         print(f"  Track       : {ec.track}")
         print(f"  Estimator   : {ec.use_estimator}")
         print(f"  Episodes    : {episodes}")
@@ -219,6 +281,7 @@ def evaluate_model(
     crash_count = sum(1 for r in results if r["term_reason"] == "crash")
 
     summary: Dict[str, Any] = {
+        "preset": preset,
         "model_path": str(model_path),
         "episodes": episodes,
         "seed": seed,
@@ -265,6 +328,11 @@ def evaluate_model(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate a saved SB3 model")
     parser.add_argument(
+        "--preset", type=str, default="baseline",
+        choices=list(PRESETS.keys()),
+        help="Evaluation preset (default: baseline)",
+    )
+    parser.add_argument(
         "--model-path", type=str, required=True,
         help="Path to saved SB3 model (.zip)",
     )
@@ -280,13 +348,22 @@ def main() -> None:
 
     _add_env_args(parser)
     _add_run_args(parser)
+
+    # --- Two-pass parse: resolve preset first, then apply its values as
+    #     argparse defaults so that explicit CLI args always win. ---
+    pre_args, _ = parser.parse_known_args()
+    preset_name = pre_args.preset
+    parser.set_defaults(**PRESETS[preset_name])
     args = parser.parse_args()
+
+    print(f"Preset: {preset_name}")
 
     ec = EnvConfig()
     env_keys = [
         "track", "track_radius", "track_z", "track_n_pts", "wp_radius",
         "n_laps", "dt_sim", "control_decimation", "max_steps",
         "a_residual_max", "yaw_rate_max", "use_estimator",
+        "use_gates", "gate_radius_m", "gate_half_thickness_m",
     ]
     _apply_overrides(ec, args, env_keys)
 
@@ -307,6 +384,7 @@ def main() -> None:
         results_dir=rc.results_dir,
         deterministic=args.deterministic,
         verbose=True,
+        preset=preset_name,
     )
 
 
