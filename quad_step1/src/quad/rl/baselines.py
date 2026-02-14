@@ -30,6 +30,52 @@ from quad.rl.config import EnvConfig, FullConfig, load_config_from_args, save_co
 
 
 # ---------------------------------------------------------------------------
+# Evaluation presets
+# ---------------------------------------------------------------------------
+
+PRESETS: Dict[str, Dict[str, Any]] = {
+    "debug": {
+        "episodes": 3,
+        "seed": 1,
+        "track": "circle",
+        "track_radius": 3.0,
+        "track_n_pts": 72,
+        "wp_radius": 2.0,
+        "wind_enabled": False,
+        "use_estimator": False,
+        "use_gates": False,
+        "control_decimation": 2,
+        "max_steps": 800,
+        "verbose": 1,
+    },
+    "baseline": {
+        "track": "circle",
+        "track_radius": 3.0,
+        "track_n_pts": 12,
+        "wp_radius": 1.5,
+        "wind_enabled": True,
+        "use_estimator": False,
+        "use_gates": False,
+        "control_decimation": 10,
+        "max_steps": 2000,
+    },
+    "hard": {
+        "track": "circle",
+        "track_radius": 3.0,
+        "track_n_pts": 12,
+        "wp_radius": 0.5,
+        "wind_enabled": True,
+        "use_estimator": True,
+        "use_gates": True,
+        "gate_radius_m": 0.5,
+        "gate_half_thickness_m": 0.2,
+        "control_decimation": 10,
+        "max_steps": 2000,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # Track builder (from RL EnvConfig)
 # ---------------------------------------------------------------------------
 
@@ -368,6 +414,7 @@ def run_baseline(
     verbose: bool = True,
     run_name: str = "",
     wind_enabled: bool = True,
+    preset: str = "",
 ) -> Dict[str, Any]:
     """Run *episodes* with the given baseline policy and report statistics.
 
@@ -416,6 +463,8 @@ def run_baseline(
         env=env,
         run_name=run_name,
     )
+    if preset:
+        ep_config_template["preset"] = preset
 
     results: List[Dict[str, Any]] = []
     t0 = time.monotonic()
@@ -446,6 +495,7 @@ def run_baseline(
     crash_count = sum(1 for r in results if r["term_reason"] == "crash")
 
     summary: Dict[str, Any] = {
+        "preset": preset,
         "policy": policy_name,
         "episodes": episodes,
         "seed": seed,
@@ -498,6 +548,11 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Baseline policy evaluation")
+    parser.add_argument(
+        "--preset", type=str, default="baseline",
+        choices=list(PRESETS.keys()),
+        help="Evaluation preset (default: baseline)",
+    )
     _add_baseline_args(parser)
 
     # Reuse the shared config args (env + run only, no PPO)
@@ -521,6 +576,12 @@ def main() -> None:
             )
             break
     _add_run_args(parser)
+
+    # --- Two-pass parse: resolve preset first, then apply its values as
+    #     argparse defaults so that explicit CLI args always win. ---
+    pre_args, _ = parser.parse_known_args()
+    preset_name = pre_args.preset
+    parser.set_defaults(**PRESETS[preset_name])
     args = parser.parse_args()
 
     ec = _EC()
@@ -541,7 +602,7 @@ def main() -> None:
 
     seed = rc.seed
 
-    # --no-wind → False, --wind → True, neither → True (default)
+    # --no-wind → False, --wind → True, neither → preset value (fallback True)
     wind = args.wind_enabled if args.wind_enabled is not None else True
 
     run_baseline(
@@ -553,6 +614,7 @@ def main() -> None:
         verbose=True,
         run_name=rc.run_name,
         wind_enabled=wind,
+        preset=preset_name,
     )
 
 

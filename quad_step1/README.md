@@ -108,7 +108,7 @@ Quadrotor UAV on SE(3)" (CDC 2010). It provides:
 - Inertia: Diagonal [0.0023, 0.0023, 0.004] kg·m²
 - Thrust limits: [0, 15] N
 - Position gains: Kp = [6, 6, 8], Kd = [4, 4, 5]
-- Attitude gains: Kr = [0.1, 0.1, 0.05], Kw = [0.01, 0.01, 0.005]
+- Attitude gains: Kr = [0.1, 0.1, 0.05], Kw = [0.02, 0.02, 0.01]
 
 ## Expected Results
 
