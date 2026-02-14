@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import subprocess
 import sys
@@ -117,6 +118,18 @@ def _try_git_commit() -> str | None:
         return None
 
 
+def _gains_id(params) -> str:
+    """Deterministic short hash of SE(3) controller gains (Kp, Kd, Kr, Kw)."""
+    vals = np.concatenate([
+        params.kp_pos.ravel(),
+        params.kd_pos.ravel(),
+        params.kr_att.ravel(),
+        params.kw_rate.ravel(),
+    ])
+    token = ",".join(f"{float(x):.8f}" for x in vals)
+    return "se3_" + hashlib.sha1(token.encode()).hexdigest()[:8]
+
+
 def _build_episode_config(
     policy: str,
     seed: int,
@@ -171,6 +184,22 @@ def _build_episode_config(
     if wp.enabled:
         cfg["wind_mean_mps"] = [round(float(v), 6) for v in wp.wind_vel]
         cfg["gust_enabled"] = bool(wp.gust_std > 0)
+        # WindParams.seed is the configured default; the actual per-episode
+        # disturbance RNG seed is derived from the episode seed inside
+        # env.reset() and is therefore implicitly reproducible via "seed".
+        cfg["wind_params_seed"] = int(wp.seed)
+        cfg["gust_std"] = float(wp.gust_std)
+        cfg["gust_tau"] = float(wp.gust_tau)
+
+    # 8) Controller identity
+    cfg["controller_name"] = "se3"
+    cfg["gains_id"] = _gains_id(env.params)
+    cfg["se3_gains"] = {
+        "kp_pos": [float(x) for x in env.params.kp_pos.ravel()],
+        "kd_pos": [float(x) for x in env.params.kd_pos.ravel()],
+        "kr_att": [float(x) for x in env.params.kr_att.ravel()],
+        "kw_rate": [float(x) for x in env.params.kw_rate.ravel()],
+    }
 
     return cfg
 
