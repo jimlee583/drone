@@ -367,6 +367,7 @@ def run_baseline(
     results_dir: str = "results_rl",
     verbose: bool = True,
     run_name: str = "",
+    wind_enabled: bool = True,
 ) -> Dict[str, Any]:
     """Run *episodes* with the given baseline policy and report statistics.
 
@@ -386,16 +387,25 @@ def run_baseline(
         Print per-episode + aggregate info.
     run_name : str
         Optional human-readable run identifier.
+    wind_enabled : bool
+        Enable wind/gust disturbances. ``False`` sets
+        ``Params.wind.enabled = False`` (zero external forces).
 
     Returns
     -------
     dict
         Aggregate statistics and per-episode results.
     """
+    from quad.params import default_params
+
     ec = env_config or EnvConfig()
     track = _make_track(ec)
     base_cfg = _make_base_env_config(ec)
-    env = QuadRacingEnv(track=track, config=base_cfg)
+
+    params = default_params()
+    params.wind.enabled = wind_enabled
+
+    env = QuadRacingEnv(track=track, config=base_cfg, params=params)
 
     # Build the config snapshot once (shared across all episodes).
     ep_config_template = _build_episode_config(
@@ -478,6 +488,10 @@ def run_baseline(
 def _add_baseline_args(parser):
     parser.add_argument("--policy", type=str, default="zero", choices=["zero", "random"])
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--wind", dest="wind_enabled", action="store_true", default=None,
+                        help="Enable wind/gust disturbances (default)")
+    parser.add_argument("--no-wind", dest="wind_enabled", action="store_false",
+                        help="Disable all wind/gust disturbances")
 
 
 def main() -> None:
@@ -517,6 +531,9 @@ def main() -> None:
 
     seed = rc.seed
 
+    # --no-wind → False, --wind → True, neither → True (default)
+    wind = args.wind_enabled if args.wind_enabled is not None else True
+
     run_baseline(
         policy_name=args.policy,
         episodes=args.episodes,
@@ -525,6 +542,7 @@ def main() -> None:
         results_dir=rc.results_dir,
         verbose=True,
         run_name=rc.run_name,
+        wind_enabled=wind,
     )
 
 
