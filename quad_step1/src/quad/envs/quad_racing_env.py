@@ -309,6 +309,12 @@ class QuadRacingEnv(gym.Env):
         self._gates_passed: int = 0
         self._np_random: Optional[np.random.Generator] = None
 
+        # Diagnostic state (populated during step, used for info enrichment)
+        self._crash_type: Optional[str] = None
+        self._crash_detail: Optional[str] = None
+        self._last_cmd_control: Any = None
+        self._last_applied_control: Any = None
+
         # Estimator state (lazy-initialised if needed)
         self._est_state: Any = None
         self._sensor_st: Any = None
@@ -366,6 +372,10 @@ class QuadRacingEnv(gym.Env):
         self._wps_reached = 0
         self._gates_passed = 0
         self._prev_pos = self._state.p.copy()
+        self._crash_type = None
+        self._crash_detail = None
+        self._last_cmd_control = None
+        self._last_applied_control = None
 
         # Gate track
         if self.cfg.use_gates and self._gate_track_template is not None:
@@ -493,6 +503,43 @@ class QuadRacingEnv(gym.Env):
         obs = self._get_obs()
         info = self._info()
         info["term_reason"] = term_reason
+        info["action"] = action.copy()
+
+        # Gate-mode crossing flags (this env step)
+        if self.cfg.use_gates:
+            info["crossed"] = gate_crossed
+            info["wrong_dir"] = gate_wrong_dir
+            info["lateral_miss"] = gate_lateral_miss
+
+        # Termination details
+        if terminated or truncated:
+            if term_reason == "crash" and self._crash_type:
+                info["term_code"] = "crash_" + self._crash_type
+                info["term_detail"] = self._crash_detail or "crash"
+                info["crash_type"] = self._crash_type
+            elif term_reason == "success":
+                info["term_code"] = "success"
+                info["term_detail"] = "Track completed"
+            elif term_reason == "max_steps":
+                info["term_code"] = "timeout"
+                info["term_detail"] = f"Reached max_steps={self.cfg.max_steps}"
+            elif term_reason == "wrong_direction":
+                info["term_code"] = "wrong_direction"
+                info["term_detail"] = "Gate crossed in wrong direction"
+            elif term_reason == "gate_miss":
+                info["term_code"] = "gate_miss"
+                info["term_detail"] = "Lateral miss on gate crossing"
+            else:
+                info["term_code"] = term_reason or "unknown"
+                info["term_detail"] = term_reason or "unknown"
+
+        # Control snapshot (from last inner sim sub-step)
+        if self._last_cmd_control is not None:
+            info["thrust_cmd"] = float(self._last_cmd_control.thrust_N)
+            info["moments_cmd"] = self._last_cmd_control.moments_Nm.copy()
+        if self._last_applied_control is not None:
+            info["thrust_applied"] = float(self._last_applied_control.thrust_N)
+            info["moments_applied"] = self._last_applied_control.moments_Nm.copy()
 
         # Render if human mode
         if self.render_mode == "human" and (
@@ -593,6 +640,8 @@ class QuadRacingEnv(gym.Env):
         self._act_state, applied_control = step_actuator(
             self._act_state, cmd_control, self.params.actuator, dt,
         )
+        self._last_cmd_control = cmd_control
+        self._last_applied_control = applied_control
 
         # Disturbances
         F_ext, tau_ext, self._dist_state = compute_disturbance_forces(
@@ -689,24 +738,40 @@ class QuadRacingEnv(gym.Env):
 
     def _is_crashed(self) -> bool:
         s = self._state
+        self._crash_type = None
+        self._crash_detail = None
+
         if s is None:
+            self._crash_type = "null_state"
+            self._crash_detail = "State is None"
             return True
 
         # NaN / inf check
         for arr in (s.p, s.v, s.q, s.w_body):
             if not np.all(np.isfinite(arr)):
+                self._crash_type = "nan_inf"
+                self._crash_detail = "NaN or Inf in state arrays"
                 return True
 
         # Position bound
-        if np.linalg.norm(s.p) > self.cfg.pos_limit:
+        pos_norm = float(np.linalg.norm(s.p))
+        if pos_norm > self.cfg.pos_limit:
+            self._crash_type = "pos_limit"
+            self._crash_detail = (
+                f"Position norm {pos_norm:.2f} exceeds limit {self.cfg.pos_limit}"
+            )
             return True
 
         # Tilt check: angle between body-z and world-z
         R = quat_to_R(s.q)
         b3 = R @ np.array([0.0, 0.0, 1.0])
         cos_tilt = np.clip(b3[2], -1.0, 1.0)
-        tilt_deg = np.degrees(np.arccos(cos_tilt))
+        tilt_deg = float(np.degrees(np.arccos(cos_tilt)))
         if tilt_deg > self.cfg.tilt_limit_deg:
+            self._crash_type = "tilt_limit"
+            self._crash_detail = (
+                f"Tilt {tilt_deg:.1f}deg exceeds limit {self.cfg.tilt_limit_deg}deg"
+            )
             return True
 
         return False
@@ -716,7 +781,8 @@ class QuadRacingEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _info(self) -> Dict[str, Any]:
-        p = self._state.p if self._state is not None else np.zeros(3)
+        s = self._state
+        p = s.p if s is not None else np.zeros(3)
 
         if self.cfg.use_gates and self._gate_track is not None:
             gate = self._gate_track.current_gate()
@@ -736,11 +802,28 @@ class QuadRacingEnv(gym.Env):
             "position": p.copy(),
         }
 
+        # State snapshot (always available, cheap)
+        if s is not None:
+            info["vel"] = s.v.copy()
+            info["quat"] = s.q.copy()
+            info["omega"] = s.w_body.copy()
+
         if self.cfg.use_gates and self._gate_track is not None:
             info["gates_passed"] = self._gates_passed
             info["current_gate_idx"] = self._gate_track.current_gate_idx
             info["n_gates"] = self._gate_track.n_gates
-            info["signed_dist"] = self._gate_track.signed_distance(p)
+            d = self._gate_track.signed_distance(p)
+            info["signed_dist"] = d
+            info["d_plane"] = d
+            # Lateral distance from gate centre in the gate plane
+            gate_cur = self._gate_track.current_gate()
+            p_proj = p - d * gate_cur.normal_w
+            info["lateral_m"] = float(np.linalg.norm(p_proj - gate_cur.center_w))
+            info["gate_radius_m"] = gate_cur.radius_m
+            info["gate_half_thickness_m"] = gate_cur.half_thickness_m
+        else:
+            if self._track:
+                info["wp_idx"] = self._track.current_wp
 
         return info
 
